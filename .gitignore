@@ -1,0 +1,8 @@
+.gocache/
+.tmp/
+bin/dnsgeo
+dnsgeo
+dnsgeo-cli.zip
+data/*.mmdb
+__pycache__/
+*.pyc
