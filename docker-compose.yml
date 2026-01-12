@@ -1,0 +1,18 @@
+services:
+  dnsgeeo:
+    build: .
+    ports:
+      - "8080:8080"
+      - "9091:9090"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    environment:
+      # Optional: enable GeoLite2 auto-download at container start.
+      # MAXMIND_LICENSE_KEY: "YOUR_MAXMIND_LICENSE_KEY"
+      DNSGEEO_WHOIS_REDIS_URL: redis://redis:6379/0
+      DNSGEEO_WHOIS_CACHE_TTL_HOURS: "48"
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
