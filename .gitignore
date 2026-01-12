@@ -6,7 +6,7 @@
 .venv/
 venv/
 bin/dnsgeeo
-dnsgeeo
+/dnsgeeo
 dnsgeeo-cli.zip
 data/*.mmdb
 __pycache__/
