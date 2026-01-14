@@ -9,9 +9,8 @@ import sys
 import urllib.error
 import urllib.request
 
-import publicsuffix2
 import whois
-from publicsuffix2 import get_sld
+from publicsuffixlist import PublicSuffixList
 
 DDNS_SUFFIX_PROVIDERS = {
     "duckdns": {"duckdns.org"},
@@ -35,6 +34,14 @@ DDNS_NS_PATTERNS = {
 
 _PSL_PRIVATE_OWNER_BY_SUFFIX = None
 _PSL_PRIVATE_RULES = None
+_PSL = None  # Cached PublicSuffixList instance
+
+def _get_psl():
+    """Get or create cached PublicSuffixList instance."""
+    global _PSL
+    if _PSL is None:
+        _PSL = PublicSuffixList()
+    return _PSL
 
 
 def parse_args():
@@ -132,7 +139,9 @@ def load_psl_private_rules():
 
     owners = {}
     rules = []
-    psl_path = os.path.join(os.path.dirname(publicsuffix2.__file__), "public_suffix_list.dat")
+    # publicsuffixlist stores the PSL data in its package
+    import publicsuffixlist
+    psl_path = os.path.join(os.path.dirname(publicsuffixlist.__file__), "public_suffix_list.dat")
     try:
         with open(psl_path, "r", encoding="utf-8") as handle:
             in_private = False
@@ -238,7 +247,8 @@ def psl_private_info(domain):
     domain = domain.strip().strip(".")
     if not domain:
         return "", "", "", "", False
-    public_sld = get_sld(domain) or ""
+    psl = _get_psl()
+    public_sld = psl.privatesuffix(domain) or ""
     public_sld = public_sld.strip(".")
     private_suffix, private_sld, private_owner, supported = private_suffix_info(domain)
     is_private = bool(private_suffix)
@@ -404,7 +414,8 @@ def root_domain(domain):
     private_suffix, _, _, _ = private_suffix_info(domain)
     if private_suffix:
         return private_suffix
-    sld = get_sld(domain)
+    psl = _get_psl()
+    sld = psl.privatesuffix(domain)
     return sld or domain
 
 
