@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -180,11 +181,9 @@ func OpenDBs(cfg *Config) (city *geoip2.Reader, asn *geoip2.Reader, err error) {
 
 // CheckMaliciousDomain uses Quad9's threat intelligence to check if a domain is malicious.
 // Quad9 (9.9.9.9) blocks malicious domains by returning NXDOMAIN with RA flag set to 0.
-// We only check Quad9 if the domain resolved successfully with our regular resolvers.
-func CheckMaliciousDomain(ctx context.Context, domain string, resolvedSuccessfully bool, timeout time.Duration) bool {
-	if !resolvedSuccessfully {
-		return false
-	}
+// NOTE: This check runs regardless of primary DNS resolution status, as Quad9 may have
+// different results (blocked domains vs genuinely non-existent domains).
+func CheckMaliciousDomain(ctx context.Context, domain string, timeout time.Duration) bool {
 
 	if timeout <= 0 {
 		timeout = 2 * time.Second
@@ -243,6 +242,8 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 			cancel()
 			if err != nil {
 				whoisErr = err.Error()
+				// Set empty map to distinguish "failed" from "disabled"
+				whoisByDomain = make(map[string]*WhoisToolInfo)
 			} else {
 				whoisByDomain = info
 			}
@@ -288,9 +289,11 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 				errText = "no_records"
 			}
 
+			// Always run malicious check if enabled, regardless of DNS resolution status
+			// This is important because Quad9 may block malicious domains that our DNS can't resolve
 			var maliciousPtr *bool
-			if cfg.CheckMalicious && len(addrs) > 0 {
-				isMalicious := CheckMaliciousDomain(ctx, host, true, timeout)
+			if cfg.CheckMalicious {
+				isMalicious := CheckMaliciousDomain(ctx, host, timeout)
 				maliciousPtr = &isMalicious
 			}
 
@@ -309,14 +312,14 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 				IPs:       enriched,
 				Error:     errText,
 			}
-			if whoisByDomain != nil {
+			// Simplified WHOIS handling: if WHOIS was enabled, check results
+			if cfg.EnableWhois && cfg.WhoisToolPath != "" && whoisByDomain != nil {
 				if info, ok := whoisByDomain[host]; ok {
 					result.Whois = info
 				} else if whoisErr != "" {
+					// Domain wasn't in successful results, so WHOIS lookup failed
 					result.WhoisError = whoisErr
 				}
-			} else if whoisErr != "" {
-				result.WhoisError = whoisErr
 			}
 			results[idx] = result
 		}(i, raw)
@@ -348,13 +351,18 @@ func unique(in []net.IPAddr, preferV6 bool) []net.IPAddr {
 }
 
 func EnrichIP(ip net.IP, cityDB *geoip2.Reader, asnDB *geoip2.Reader) (IPEnriched, error) {
-	key := ip.String()
+	// Create cache key that includes which DBs are available
+	// This prevents returning stale data when DB availability changes
+	hasCityDB := cityDB != nil
+	hasASNDB := asnDB != nil
+	key := fmt.Sprintf("%s:%t:%t", ip.String(), hasCityDB, hasASNDB)
+
 	if ipCache != nil {
 		if v, ok := ipCache.Get(key); ok {
 			return v, nil
 		}
 	}
-	info := IPEnriched{IP: key}
+	info := IPEnriched{IP: ip.String()}
 	if ip.To4() != nil {
 		info.Family = "v4"
 	} else {

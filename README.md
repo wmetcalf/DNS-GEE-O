@@ -264,7 +264,9 @@ Environment variables:
 - `DNSGEEO_WHOIS_REDIS_URL` (optional) - Redis cache for WHOIS/RDAP
 - `DNSGEEO_WHOIS_CACHE_TTL_HOURS` (default: 24; docker-compose sets 48)
 - `DNSGEEO_CITY_DB` / `DNSGEEO_ASN_DB` (override DB paths in container)
-- `DNSGEEO_WHOIS_TOOL` / `DNSGEEO_WHOIS_PYTHON` (override WHOIS helper paths; not overridable via API)
+- `DNSGEEO_WHOIS_TOOL` / `DNSGEEO_WHOIS_PYTHON` (override WHOIS helper paths)
+
+**Security Note:** Tool paths (`--whois-tool`, `--whois-python`) are **NOT exposed via API/MCP** for security. They can only be configured via CLI flags or environment variables on the server. API clients cannot inject custom tool paths. Python executables are validated against an allowlist or must be absolute paths, and tool paths must be `.py` files.
 
 ### REST API (FastAPI)
 
@@ -503,7 +505,7 @@ internal/dnsgeeo/dnsgeeo.go   # Core resolution & enrichment logic
 **Malicious Domain Detection (`CheckMaliciousDomain`)**
 - Uses Quad9's threat intelligence DNS (9.9.9.9)
 - Detects blocked domains via NXDOMAIN with RA flag = 0
-- Only checks domains that resolved successfully with regular DNS
+- Checks **all domains** regardless of primary DNS resolution status (important for detecting malicious domains that may be blocked or unreachable)
 - Uses `miekg/dns` library for proper DNS message parsing
 
 ## Examples Directory

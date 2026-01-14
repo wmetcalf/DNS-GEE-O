@@ -1,0 +1,37 @@
+x-dnsgeeo: &dnsgeeo
+  build: .
+  dns:
+    - 8.8.8.8
+    - 8.8.4.4
+  environment:
+    DNSGEEO_WHOIS_REDIS_URL: redis://redis:6379/0
+    DNSGEEO_WHOIS_CACHE_TTL_HOURS: "48"
+    # MAXMIND_LICENSE_KEY: "YOUR_MAXMIND_LICENSE_KEY"
+  depends_on:
+    - redis
+
+services:
+  dnsgeeo-1:
+    <<: *dnsgeeo
+  dnsgeeo-2:
+    <<: *dnsgeeo
+  dnsgeeo-3:
+    <<: *dnsgeeo
+  dnsgeeo-4:
+    <<: *dnsgeeo
+
+  redis:
+    image: redis:7-alpine
+
+  lb:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:8080"
+      - "9091:9090"
+    depends_on:
+      - dnsgeeo-1
+      - dnsgeeo-2
+      - dnsgeeo-3
+      - dnsgeeo-4
+    volumes:
+      - ./tools/nginx-lb.conf:/etc/nginx/nginx.conf:ro

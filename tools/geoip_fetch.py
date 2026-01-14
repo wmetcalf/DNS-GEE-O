@@ -16,14 +16,23 @@ def log(msg):
 
 
 def download_and_extract(edition_id, license_key, dest_path):
+    # Build URL without license key (security: don't put secrets in URLs)
     url = (
         "https://download.maxmind.com/app/geoip_download"
-        f"?edition_id={edition_id}&license_key={license_key}&suffix=tar.gz"
+        f"?edition_id={edition_id}&suffix=tar.gz"
     )
     with tempfile.TemporaryDirectory() as tmpdir:
         archive_path = os.path.join(tmpdir, f"{edition_id}.tar.gz")
         log(f"Downloading {edition_id}...")
-        urllib.request.urlretrieve(url, archive_path)
+
+        # Use HTTP Basic Auth - license key as username, empty password
+        import base64
+        credentials = base64.b64encode(f"{license_key}:".encode()).decode("ascii")
+        headers = {"Authorization": f"Basic {credentials}"}
+
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req) as response, open(archive_path, "wb") as out_file:
+            out_file.write(response.read())
         with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(tmpdir)
         mmdb_path = None

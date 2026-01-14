@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -55,6 +57,92 @@ type PSLPrivateEntry struct {
 	Owner  string `json:"owner,omitempty"`
 }
 
+// validatePythonPath validates that the Python path is safe to execute.
+// It checks against an allowlist and verifies the executable is actually Python.
+func validatePythonPath(pythonPath string) error {
+	// Allowlist of safe Python executables
+	allowlist := []string{
+		"python3",
+		"python",
+		"/usr/bin/python3",
+		"/usr/bin/python",
+		"/usr/local/bin/python3",
+		"/usr/local/bin/python",
+	}
+
+	for _, safe := range allowlist {
+		if pythonPath == safe {
+			return nil
+		}
+	}
+
+	// If not in allowlist, path must be absolute
+	if !filepath.IsAbs(pythonPath) {
+		return fmt.Errorf("python path must be absolute or in allowlist (python3, python, /usr/bin/python3, etc)")
+	}
+
+	// Check file exists
+	info, err := os.Stat(pythonPath)
+	if err != nil {
+		return fmt.Errorf("python path not found: %w", err)
+	}
+
+	// Check it's not a directory
+	if info.IsDir() {
+		return fmt.Errorf("python path is a directory")
+	}
+
+	// Check file is executable
+	if info.Mode()&0111 == 0 {
+		return fmt.Errorf("python path is not executable")
+	}
+
+	// Verify it's actually Python by running --version
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, pythonPath, "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("not a valid python executable: %w", err)
+	}
+
+	if !strings.Contains(strings.ToLower(string(output)), "python") {
+		return fmt.Errorf("executable is not Python (version output: %s)", strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
+// validateToolPath validates that the whois tool path is safe.
+func validateToolPath(toolPath string) error {
+	if toolPath == "" {
+		return errors.New("tool path is empty")
+	}
+
+	// Must be absolute or relative path (not just a command name)
+	if !strings.Contains(toolPath, "/") && !strings.Contains(toolPath, "\\") {
+		return fmt.Errorf("tool path must be a file path, not a command name")
+	}
+
+	// Check file exists
+	info, err := os.Stat(toolPath)
+	if err != nil {
+		return fmt.Errorf("tool path not found: %w", err)
+	}
+
+	// Check it's not a directory
+	if info.IsDir() {
+		return fmt.Errorf("tool path is a directory")
+	}
+
+	// For security, require .py extension
+	if !strings.HasSuffix(strings.ToLower(toolPath), ".py") {
+		return fmt.Errorf("tool path must be a Python script (.py)")
+	}
+
+	return nil
+}
+
 func RunWhoisTool(ctx context.Context, pythonPath, toolPath string, domains []string, timeout time.Duration) (map[string]*WhoisToolInfo, error) {
 	if toolPath == "" {
 		return nil, errors.New("whois tool path is empty")
@@ -62,6 +150,15 @@ func RunWhoisTool(ctx context.Context, pythonPath, toolPath string, domains []st
 	if pythonPath == "" {
 		pythonPath = "python3"
 	}
+
+	// Validate paths for security
+	if err := validateToolPath(toolPath); err != nil {
+		return nil, fmt.Errorf("invalid tool path: %w", err)
+	}
+	if err := validatePythonPath(pythonPath); err != nil {
+		return nil, fmt.Errorf("invalid python path: %w", err)
+	}
+
 	if len(domains) == 0 {
 		return map[string]*WhoisToolInfo{}, nil
 	}
@@ -124,6 +221,15 @@ func RunWhoisPSLPrivateList(ctx context.Context, pythonPath, toolPath string, ti
 	if pythonPath == "" {
 		pythonPath = "python3"
 	}
+
+	// Validate paths for security
+	if err := validateToolPath(toolPath); err != nil {
+		return nil, fmt.Errorf("invalid tool path: %w", err)
+	}
+	if err := validatePythonPath(pythonPath); err != nil {
+		return nil, fmt.Errorf("invalid python path: %w", err)
+	}
+
 	timeoutSeconds := int(timeout.Seconds())
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 8

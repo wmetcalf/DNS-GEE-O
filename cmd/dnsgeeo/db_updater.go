@@ -79,16 +79,20 @@ func downloadGeoLiteEdition(ctx context.Context, licenseKey, editionID, destPath
 		return fmt.Errorf("create destination directory: %w", err)
 	}
 
+	// Build URL without license key (security: don't put secrets in URLs)
 	params := url.Values{
-		"edition_id":  {editionID},
-		"license_key": {licenseKey},
-		"suffix":      {"tar.gz"},
+		"edition_id": {editionID},
+		"suffix":     {"tar.gz"},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, geoLiteDownloadEndpoint+"?"+params.Encode(), nil)
 	if err != nil {
 		return fmt.Errorf("build download request: %w", err)
 	}
+
+	// Use HTTP Basic Auth instead of query parameter
+	// MaxMind API accepts license key as username with empty password
+	req.SetBasicAuth(licenseKey, "")
 
 	client := &http.Client{Timeout: 2 * time.Minute}
 	resp, err := client.Do(req)
@@ -142,16 +146,17 @@ func writeMMDBFile(r io.Reader, destPath string) error {
 		os.Remove(tmp.Name())
 	}()
 
+	// Set permissions immediately after creation to avoid race condition
+	if err := tmp.Chmod(0o644); err != nil {
+		return fmt.Errorf("chmod mmdb: %w", err)
+	}
+
 	if _, err := io.Copy(tmp, r); err != nil {
 		return fmt.Errorf("write mmdb: %w", err)
 	}
 
 	if err := tmp.Sync(); err != nil {
 		return fmt.Errorf("sync mmdb: %w", err)
-	}
-
-	if err := tmp.Chmod(0o644); err != nil {
-		return fmt.Errorf("chmod mmdb: %w", err)
 	}
 
 	if err := tmp.Close(); err != nil {
