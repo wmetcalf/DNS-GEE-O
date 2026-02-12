@@ -174,15 +174,50 @@ def main():
         default=None,
         help="Maximum number of pages to fetch (default: unlimited)",
     )
+    parser.add_argument(
+        "--min-domains",
+        type=int,
+        default=1000,
+        help="Minimum domains required to accept the scrape (default: 1000)",
+    )
+    parser.add_argument(
+        "--max-shrink-pct",
+        type=float,
+        default=50.0,
+        help="Max allowed percentage shrink vs existing file (default: 50)",
+    )
     args = parser.parse_args()
 
     domains = scrape_all(delay=args.delay, max_pages=args.max_pages)
 
     if not domains:
-        print("No domains scraped.", file=sys.stderr)
+        print("ERROR: No domains scraped.", file=sys.stderr)
+        return 1
+
+    if len(domains) < args.min_domains:
+        print(
+            f"ERROR: Only scraped {len(domains)} domains, minimum is {args.min_domains}. "
+            "Site may be down or rate-limiting. Refusing to write.",
+            file=sys.stderr,
+        )
         return 1
 
     import os
+
+    # Check for excessive shrinkage vs existing file
+    if os.path.isfile(args.output):
+        with open(args.output, "r", encoding="utf-8") as f:
+            existing_count = sum(1 for line in f if line.strip())
+        if existing_count > 0:
+            shrink_pct = (1 - len(domains) / existing_count) * 100
+            if shrink_pct > args.max_shrink_pct:
+                print(
+                    f"ERROR: New list ({len(domains)}) is {shrink_pct:.1f}% smaller than "
+                    f"existing ({existing_count}). Max allowed shrink is {args.max_shrink_pct}%. "
+                    "Refusing to overwrite.",
+                    file=sys.stderr,
+                )
+                return 1
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:

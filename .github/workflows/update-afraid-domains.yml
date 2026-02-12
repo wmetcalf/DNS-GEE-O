@@ -21,6 +21,15 @@ jobs:
       - name: Scrape afraid.org public domains
         run: python3 tools/scrape_afraid_registry.py -o data/afraid_public_domains.txt --delay 2
 
+      - name: Validate output
+        run: |
+          count=$(wc -l < data/afraid_public_domains.txt)
+          echo "Scraped domain count: $count"
+          if [ "$count" -lt 1000 ]; then
+            echo "::error::Domain count ($count) is below minimum threshold (1000)"
+            exit 1
+          fi
+
       - name: Commit if changed
         run: |
           git diff --quiet data/afraid_public_domains.txt && exit 0
