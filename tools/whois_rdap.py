@@ -35,6 +35,7 @@ DDNS_NS_PATTERNS = {
 _PSL_PRIVATE_OWNER_BY_SUFFIX = None
 _PSL_PRIVATE_RULES = None
 _PSL = None  # Cached PublicSuffixList instance
+_AFRAID_PUBLIC_DOMAINS = None  # Cached set of afraid.org public registration domains
 
 def _get_psl():
     """Get or create cached PublicSuffixList instance."""
@@ -42,6 +43,54 @@ def _get_psl():
     if _PSL is None:
         _PSL = PublicSuffixList()
     return _PSL
+
+
+def _load_afraid_public_domains():
+    """Load afraid.org public registration domains from data file."""
+    global _AFRAID_PUBLIC_DOMAINS
+    if _AFRAID_PUBLIC_DOMAINS is not None:
+        return _AFRAID_PUBLIC_DOMAINS
+
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "data", "afraid_public_domains.txt"),
+        os.path.join(os.path.dirname(__file__), "data", "afraid_public_domains.txt"),
+        os.getenv("DNSGEEO_AFRAID_DOMAINS_PATH", ""),
+    ]
+    for path in candidates:
+        if not path:
+            continue
+        path = os.path.normpath(path)
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    _AFRAID_PUBLIC_DOMAINS = frozenset(
+                        line.strip().lower() for line in f if line.strip()
+                    )
+                return _AFRAID_PUBLIC_DOMAINS
+            except OSError:
+                pass
+
+    _AFRAID_PUBLIC_DOMAINS = frozenset()
+    return _AFRAID_PUBLIC_DOMAINS
+
+
+def is_afraid_public_registration(domain):
+    """Check if a domain is hosted under an afraid.org public registration domain.
+
+    Checks whether the domain itself or any parent suffix matches a known
+    afraid.org public registration domain.
+    """
+    domains = _load_afraid_public_domains()
+    if not domains:
+        return False
+    host = normalize_hostname(domain)
+    labels = host.split(".")
+    # Check each possible parent domain (e.g. for sub.mooo.com: mooo.com, com)
+    for i in range(len(labels)):
+        candidate = ".".join(labels[i:])
+        if candidate in domains:
+            return True
+    return False
 
 
 def parse_args():
@@ -580,6 +629,8 @@ def main():
             entry["is_afraid_hosted"] = any(
                 ns.lower().endswith(".afraid.org") for ns in name_servers if isinstance(ns, str)
             )
+            if entry["is_afraid_hosted"]:
+                entry["is_afraid_public_reg"] = is_afraid_public_registration(root)
 
         if created is not None:
             created_utc = created.astimezone(dt.timezone.utc)

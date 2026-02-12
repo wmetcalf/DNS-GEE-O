@@ -1,0 +1,31 @@
+name: Update afraid.org public domains
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday at 06:00 UTC
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install beautifulsoup4
+
+      - name: Scrape afraid.org public domains
+        run: python3 tools/scrape_afraid_registry.py -o data/afraid_public_domains.txt --delay 2
+
+      - name: Commit if changed
+        run: |
+          git diff --quiet data/afraid_public_domains.txt && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/afraid_public_domains.txt
+          git commit -m "data: update afraid.org public domain list"
+          git push

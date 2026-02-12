@@ -25,6 +25,35 @@ def dnsgeeo_resolve(
     whois: Optional[bool] = None,
     whois_timeout_ms: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """
+    Resolve domains to IPs with GeoIP and WHOIS enrichment.
+
+    Returns results with IPs, GeoIP data, ASN info, and WHOIS details including:
+    - psl_is_private: True if domain uses a private PSL suffix (e.g., github.io, herokuapp.com)
+    - psl_private_owner: Owner of the private suffix (e.g., "GitHub Inc.")
+    - psl_private_suffix: The private suffix itself (e.g., "github.io")
+    - psl_public_suffix: Public TLD suffix (e.g., "com", "org", "io")
+    - is_afraid_hosted: True if hosted on afraid.org free DNS
+    - is_afraid_public_reg: True if domain is under an afraid.org public registration domain
+    - ddns_providers: List of detected dynamic DNS providers
+    - ddns_provider_by_suffix: Provider detected by domain suffix
+    - ddns_providers_by_ns: Providers detected by nameservers
+
+    Args:
+        domains: List of domain names or IP addresses to resolve
+        dns: Comma-separated DNS servers (default: "1.1.1.1:53,8.8.8.8:53")
+        timeout_ms: Per-host timeout in milliseconds (default: 2000)
+        parallel: Max concurrent lookups (default: 64)
+        prefer_ipv6: Include AAAA records (default: true)
+        check_malicious: Check against Quad9 threat intel (default: false)
+        city_db: Path to GeoLite2-City.mmdb (optional)
+        asn_db: Path to GeoLite2-ASN.mmdb (optional)
+        whois: Enable WHOIS/RDAP lookup (default: false)
+        whois_timeout_ms: WHOIS timeout in milliseconds (default: 3000)
+
+    Returns:
+        Dictionary with "results" key containing list of enriched domain data
+    """
     results = run_dnsgeeo(
         domains=domains,
         dns=dns,
@@ -42,6 +71,16 @@ def dnsgeeo_resolve(
 
 @app.tool()
 def dnsgeeo_psl_private_list() -> Dict[str, Any]:
+    """
+    Get the list of all private Public Suffix List (PSL) entries.
+
+    Returns all private suffixes from the PSL with their owners. Private suffixes
+    are used by hosting providers, dynamic DNS services, and platforms to delegate
+    subdomains (e.g., github.io, herokuapp.com, duckdns.org).
+
+    Returns:
+        Dictionary with "results" key containing list of {suffix, owner} entries
+    """
     entries = run_dnsgeeo_psl_private_list()
     return {"results": entries}
 

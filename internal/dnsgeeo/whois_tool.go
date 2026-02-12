@@ -23,6 +23,7 @@ type WhoisToolInfo struct {
 	RegistrantAddress          string      `json:"registrant_address,omitempty"`
 	NameServers                []string    `json:"name_servers,omitempty"`
 	IsAfraidHosted             bool        `json:"is_afraid_hosted"`
+	IsAfraidPublicReg          bool        `json:"is_afraid_public_reg"`
 	PSLRegistrableDomain       string      `json:"psl_registrable_domain,omitempty"`
 	PSLPublicRegistrableDomain string      `json:"psl_public_registrable_domain,omitempty"`
 	PSLPrivateSuffix           string      `json:"psl_private_suffix,omitempty"`
