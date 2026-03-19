@@ -35,11 +35,30 @@ DDNS_NS_PATTERNS = {
 _PSL_PRIVATE_OWNER_BY_SUFFIX = None
 _PSL_PRIVATE_RULES = None
 _PSL = None  # Cached PublicSuffixList instance
+_PSL_FILE_MTIME = 0  # Track mtime of external PSL file for auto-reload
 _AFRAID_PUBLIC_DOMAINS = None  # Cached set of afraid.org public registration domains
 
 def _get_psl():
-    """Get or create cached PublicSuffixList instance."""
-    global _PSL
+    """Get or create cached PublicSuffixList instance.
+
+    If DNSGEEO_PSL_PATH points to a file, use it and reload when it changes.
+    Otherwise fall back to the bundled publicsuffixlist package data.
+    """
+    global _PSL, _PSL_FILE_MTIME, _PSL_PRIVATE_RULES, _PSL_PRIVATE_OWNER_BY_SUFFIX
+    psl_path = os.environ.get("DNSGEEO_PSL_PATH", "")
+    if psl_path and os.path.exists(psl_path):
+        try:
+            mtime = os.path.getmtime(psl_path)
+        except OSError:
+            mtime = 0
+        if _PSL is None or mtime != _PSL_FILE_MTIME:
+            with open(psl_path, "rb") as f:
+                _PSL = PublicSuffixList(f)
+            _PSL_FILE_MTIME = mtime
+            # Invalidate private rules cache so it reparses from new data
+            _PSL_PRIVATE_RULES = None
+            _PSL_PRIVATE_OWNER_BY_SUFFIX = None
+        return _PSL
     if _PSL is None:
         _PSL = PublicSuffixList()
     return _PSL
@@ -190,7 +209,11 @@ def load_psl_private_rules():
     rules = []
     # publicsuffixlist stores the PSL data in its package
     import publicsuffixlist
-    psl_path = os.path.join(os.path.dirname(publicsuffixlist.__file__), "public_suffix_list.dat")
+    env_psl_path = os.environ.get("DNSGEEO_PSL_PATH", "")
+    if env_psl_path and os.path.exists(env_psl_path):
+        psl_path = env_psl_path
+    else:
+        psl_path = os.path.join(os.path.dirname(publicsuffixlist.__file__), "public_suffix_list.dat")
     try:
         with open(psl_path, "r", encoding="utf-8") as handle:
             in_private = False
