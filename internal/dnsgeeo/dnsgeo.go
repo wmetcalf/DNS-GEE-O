@@ -31,8 +31,9 @@ type Config struct {
 	WhoisPython    string
 	WhoisTimeout   time.Duration
 
-	CityDBPath  string
-	ASNDBPath   string
+	CityDBPath     string
+	ASNDBPath      string
+	LOLFSaaSDBPath string
 	IPCacheSize int
 	IPCacheTTL  time.Duration
 }
@@ -66,6 +67,7 @@ type HostResult struct {
 	IPs        []IPEnriched   `json:"ips,omitempty"`
 	Whois      *WhoisToolInfo `json:"whois,omitempty"`
 	WhoisError string         `json:"whois_error,omitempty"`
+	LOLFSaaS   *LOLFSaaSMatch `json:"lolfsaas,omitempty"`
 	Error      string         `json:"error,omitempty"`
 }
 
@@ -211,7 +213,7 @@ func CheckMaliciousDomain(ctx context.Context, domain string, timeout time.Durat
 
 // -------------- Core logic -------------
 
-func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, cfg *Config, cityDB *geoip2.Reader, asnDB *geoip2.Reader) ([]HostResult, error) {
+func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, cfg *Config, cityDB *geoip2.Reader, asnDB *geoip2.Reader, lolfsaasDB *LOLFSaaSDB) ([]HostResult, error) {
 	timeout := cfg.LookupTimeout
 	if timeout <= 0 {
 		timeout = 2 * time.Second
@@ -320,6 +322,9 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 					// Domain wasn't in successful results, so WHOIS lookup failed
 					result.WhoisError = whoisErr
 				}
+			}
+			if match := lolfsaasDB.Match(host); match != nil {
+				result.LOLFSaaS = match
 			}
 			results[idx] = result
 		}(i, raw)

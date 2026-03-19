@@ -18,6 +18,7 @@ type cliOptions struct {
 	preferIPv6     *bool
 	cityDB         *string
 	asnDB          *string
+	lolfsaasDB     *string
 	pretty         *bool
 	checkMalicious *bool
 	enableWhois    *bool
@@ -158,6 +159,10 @@ func applyConfigValues(values map[string]string, setFlags map[string]bool, opts 
 		case "asn-db":
 			if opts.asnDB != nil && !setFlags["asn-db"] {
 				*opts.asnDB = val
+			}
+		case "lolfsaas-db":
+			if opts.lolfsaasDB != nil && !setFlags["lolfsaas-db"] {
+				*opts.lolfsaasDB = val
 			}
 		case "pretty":
 			if opts.pretty != nil && !setFlags["pretty"] {

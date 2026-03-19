@@ -19,6 +19,7 @@ func main() {
 	var parallel int
 	var preferIPv6 bool
 	var cityDB, asnDB string
+	var lolfsaasDBPath string
 	var pretty bool
 	var checkMalicious bool
 	var enableWhois bool
@@ -38,6 +39,7 @@ func main() {
 	flag.BoolVar(&preferIPv6, "prefer-ipv6", true, "Also query AAAA (IPv6) addresses")
 	flag.StringVar(&cityDB, "city-db", os.Getenv("GEOLITE2_CITY_DB"), "Path to GeoLite2-City.mmdb (or DB-IP City mmdb)")
 	flag.StringVar(&asnDB, "asn-db", os.Getenv("GEOLITE2_ASN_DB"), "Path to GeoLite2-ASN.mmdb")
+	flag.StringVar(&lolfsaasDBPath, "lolfsaas-db", os.Getenv("DNSGEEO_LOLFSAAS_DB"), "Path to LOLFSaaS data.json")
 	flag.BoolVar(&pretty, "pretty", false, "Pretty-print JSON")
 	flag.BoolVar(&checkMalicious, "check-malicious", true, "Check domains against Quad9 threat intelligence")
 	flag.BoolVar(&enableWhois, "whois", true, "Include WHOIS/RDAP data via external tool")
@@ -73,6 +75,7 @@ func main() {
 			preferIPv6:     &preferIPv6,
 			cityDB:         &cityDB,
 			asnDB:          &asnDB,
+			lolfsaasDB:     &lolfsaasDBPath,
 			pretty:         &pretty,
 			checkMalicious: &checkMalicious,
 			enableWhois:    &enableWhois,
@@ -182,6 +185,7 @@ func main() {
 		WhoisTimeout:   time.Duration(whoisTimeoutMS) * time.Millisecond,
 		CityDBPath:     cityDB,
 		ASNDBPath:      asnDB,
+		LOLFSaaSDBPath: lolfsaasDBPath,
 		IPCacheSize:    10000,
 		IPCacheTTL:     10 * time.Minute,
 	}
@@ -203,8 +207,17 @@ func main() {
 
 	dnsgeeo.InitCache(cfg.IPCacheSize, cfg.IPCacheTTL)
 
+	var lolfsaasDB *dnsgeeo.LOLFSaaSDB
+	if cfg.LOLFSaaSDBPath != "" {
+		lolfsaasDB, err = dnsgeeo.LoadLOLFSaaSDB(cfg.LOLFSaaSDBPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "LOLFSaaS DB error:", err)
+			os.Exit(1)
+		}
+	}
+
 	ctx := context.Background()
-	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn)
+	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn, lolfsaasDB)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Lookup error:", err)
 		os.Exit(1)
