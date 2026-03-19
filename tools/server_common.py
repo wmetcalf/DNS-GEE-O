@@ -12,6 +12,10 @@ def _default_asn_db() -> str:
     return os.getenv("DNSGEEO_ASN_DB", "")
 
 
+def _default_lolfsaas_db() -> str:
+    return os.getenv("DNSGEEO_LOLFSAAS_DB", "")
+
+
 def _existing_path(path: Optional[str]) -> str:
     if not path:
         return ""
@@ -73,6 +77,10 @@ def run_dnsgeeo(
         args += ["--city-db", city_db]
     if asn_db:
         args += ["--asn-db", asn_db]
+
+    lolfsaas_db = _existing_path(_default_lolfsaas_db())
+    if lolfsaas_db:
+        args += ["--lolfsaas-db", lolfsaas_db]
 
     if whois is True:
         args += ["--whois"]

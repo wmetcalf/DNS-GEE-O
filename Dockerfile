@@ -11,6 +11,7 @@ WORKDIR /app
 ENV DNSGEEO_BIN=/app/bin/dnsgeeo
 ENV DNSGEEO_CITY_DB=/app/data/GeoLite2-City.mmdb
 ENV DNSGEEO_ASN_DB=/app/data/GeoLite2-ASN.mmdb
+ENV DNSGEEO_LOLFSAAS_DB=/app/data/lolfsaas.json
 COPY --from=builder /app/bin/dnsgeeo /app/bin/dnsgeeo
 COPY data ./data
 COPY tools ./tools
