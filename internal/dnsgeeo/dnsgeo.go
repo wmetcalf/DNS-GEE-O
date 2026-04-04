@@ -26,6 +26,7 @@ type Config struct {
 	Parallelism    int
 	PreferIPv6     bool
 	CheckMalicious bool
+	DoH            bool
 	EnableWhois    bool
 	WhoisToolPath  string
 	WhoisPython    string
@@ -74,8 +75,10 @@ type HostResult struct {
 // -------------- Resolver ---------------
 
 type RRResolver struct {
-	servers []string
-	rr      uint32
+	servers    []string
+	rr         uint32
+	Transport  DNSTransport
+	PreferIPv6 bool
 }
 
 func NewRRResolver(servers []string) *RRResolver {
@@ -85,22 +88,106 @@ func NewRRResolver(servers []string) *RRResolver {
 	return &RRResolver{servers: servers}
 }
 
+func (r *RRResolver) nextServer() string {
+	idx := int(atomic.AddUint32(&r.rr, 1)-1) % len(r.servers)
+	return r.servers[idx]
+}
+
 func (r *RRResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, string, error) {
 	if len(r.servers) == 0 {
 		return nil, "", errors.New("no DNS servers configured")
 	}
+
+	if r.Transport != nil {
+		return r.lookupDoH(ctx, host)
+	}
+
 	var usedServer string
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			idx := int(atomic.AddUint32(&r.rr, 1)-1) % len(r.servers)
-			usedServer = r.servers[idx]
+			usedServer = r.nextServer()
 			d := &net.Dialer{Timeout: 2 * time.Second}
 			return d.DialContext(ctx, network, usedServer)
 		},
 	}
 	ips, err := resolver.LookupIPAddr(ctx, host)
 	return ips, usedServer, err
+}
+
+const maxCNAMEHops = 10
+
+func (r *RRResolver) lookupDoH(ctx context.Context, host string) ([]net.IPAddr, string, error) {
+	server := r.nextServer()
+	var ips []net.IPAddr
+	qname := dns.Fqdn(host)
+
+	for i := 0; i < maxCNAMEHops; i++ {
+		if ctx.Err() != nil {
+			return nil, server, ctx.Err()
+		}
+
+		// Query A records
+		msgA := new(dns.Msg)
+		msgA.SetQuestion(qname, dns.TypeA)
+		msgA.RecursionDesired = true
+
+		respA, err := r.Transport.Exchange(ctx, msgA, server)
+		if err != nil {
+			return nil, server, err
+		}
+
+		// Check for CNAME in the answer
+		var foundCNAME string
+		for _, rr := range respA.Answer {
+			switch v := rr.(type) {
+			case *dns.A:
+				ips = append(ips, net.IPAddr{IP: v.A})
+			case *dns.CNAME:
+				foundCNAME = v.Target
+			}
+		}
+
+		// Query AAAA records only when IPv6 is enabled
+		if r.PreferIPv6 {
+			msgAAAA := new(dns.Msg)
+			msgAAAA.SetQuestion(qname, dns.TypeAAAA)
+			msgAAAA.RecursionDesired = true
+
+			respAAAA, err := r.Transport.Exchange(ctx, msgAAAA, server)
+			if err == nil {
+				for _, rr := range respAAAA.Answer {
+					switch v := rr.(type) {
+					case *dns.AAAA:
+						ips = append(ips, net.IPAddr{IP: v.AAAA})
+					case *dns.CNAME:
+						if foundCNAME == "" {
+							foundCNAME = v.Target
+						}
+					}
+				}
+			}
+		}
+
+		// If we got IPs, we're done
+		if len(ips) > 0 {
+			return ips, server, nil
+		}
+
+		// If we got a CNAME but no IPs, follow it
+		if foundCNAME != "" {
+			qname = foundCNAME
+			continue
+		}
+
+		// No IPs, no CNAME — we're done
+		break
+	}
+
+	if len(ips) == 0 {
+		return nil, server, fmt.Errorf("no A/AAAA records found for %s (after CNAME following)", host)
+	}
+	return ips, server, nil
 }
 
 func ParseServers(csv string) []string {
@@ -185,8 +272,7 @@ func OpenDBs(cfg *Config) (city *geoip2.Reader, asn *geoip2.Reader, err error) {
 // Quad9 (9.9.9.9) blocks malicious domains by returning NXDOMAIN with RA flag set to 0.
 // NOTE: This check runs regardless of primary DNS resolution status, as Quad9 may have
 // different results (blocked domains vs genuinely non-existent domains).
-func CheckMaliciousDomain(ctx context.Context, domain string, timeout time.Duration) bool {
-
+func CheckMaliciousDomain(ctx context.Context, domain string, timeout time.Duration, transport DNSTransport) bool {
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
@@ -195,11 +281,18 @@ func CheckMaliciousDomain(ctx context.Context, domain string, timeout time.Durat
 	msg.SetQuestion(dns.Fqdn(domain), dns.TypeA)
 	msg.RecursionDesired = true
 
-	client := &dns.Client{
-		Timeout: timeout,
+	var response *dns.Msg
+	var err error
+
+	if transport != nil {
+		tctx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		response, err = transport.Exchange(tctx, msg, "9.9.9.9:53")
+	} else {
+		client := &dns.Client{Timeout: timeout}
+		response, _, err = client.Exchange(msg, "9.9.9.9:53")
 	}
 
-	response, _, err := client.Exchange(msg, "9.9.9.9:53")
 	if err != nil {
 		return false
 	}
@@ -213,7 +306,7 @@ func CheckMaliciousDomain(ctx context.Context, domain string, timeout time.Durat
 
 // -------------- Core logic -------------
 
-func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, cfg *Config, cityDB *geoip2.Reader, asnDB *geoip2.Reader, lolfsaasDB *LOLFSaaSDB) ([]HostResult, error) {
+func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, cfg *Config, cityDB *geoip2.Reader, asnDB *geoip2.Reader, lolfsaasDB *LOLFSaaSDB, transport DNSTransport) ([]HostResult, error) {
 	timeout := cfg.LookupTimeout
 	if timeout <= 0 {
 		timeout = 2 * time.Second
@@ -295,7 +388,7 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 			// This is important because Quad9 may block malicious domains that our DNS can't resolve
 			var maliciousPtr *bool
 			if cfg.CheckMalicious {
-				isMalicious := CheckMaliciousDomain(ctx, host, timeout)
+				isMalicious := CheckMaliciousDomain(ctx, host, timeout, transport)
 				maliciousPtr = &isMalicious
 			}
 
