@@ -24,6 +24,7 @@ def dnsgeeo_resolve(
     asn_db: Optional[str] = None,
     whois: Optional[bool] = None,
     whois_timeout_ms: Optional[int] = None,
+    doh: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Resolve domains to IPs with GeoIP and WHOIS enrichment.
@@ -50,6 +51,7 @@ def dnsgeeo_resolve(
         asn_db: Path to GeoLite2-ASN.mmdb (optional)
         whois: Enable WHOIS/RDAP lookup (default: false)
         whois_timeout_ms: WHOIS timeout in milliseconds (default: 3000)
+        doh: Use DNS over HTTPS for all queries (default: false, or DNSGEEO_DOH env var)
 
     Returns:
         Dictionary with "results" key containing list of enriched domain data
@@ -65,6 +67,7 @@ def dnsgeeo_resolve(
         asn_db=asn_db,
         whois=whois,
         whois_timeout_ms=whois_timeout_ms,
+        doh=doh,
     )
     return {"results": results}
 
