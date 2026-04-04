@@ -58,6 +58,11 @@ def run_dnsgeeo(
     args = [_default_dnsgeeo_bin(), "--list", ",".join(domains)]
 
     if dns:
+        # Reject https:// URLs in dns parameter from API/MCP callers to prevent SSRF.
+        # Custom DoH URLs are only supported via CLI --dns, not through the API.
+        for server in dns.split(","):
+            if server.strip().startswith("https://"):
+                raise ValueError("https:// URLs are not allowed in the dns parameter")
         args += ["--dns", dns]
     if timeout_ms is not None:
         args += ["--timeout-ms", str(timeout_ms)]

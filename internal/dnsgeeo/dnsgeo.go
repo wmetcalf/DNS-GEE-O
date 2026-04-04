@@ -103,12 +103,18 @@ func (r *RRResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAdd
 	}
 
 	var usedServer string
+	var mu sync.Mutex
 	resolver := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			usedServer = r.nextServer()
+			server := r.nextServer()
+			mu.Lock()
+			if usedServer == "" {
+				usedServer = server
+			}
+			mu.Unlock()
 			d := &net.Dialer{Timeout: 2 * time.Second}
-			return d.DialContext(ctx, network, usedServer)
+			return d.DialContext(ctx, network, server)
 		},
 	}
 	ips, err := resolver.LookupIPAddr(ctx, host)
@@ -135,6 +141,20 @@ func (r *RRResolver) lookupDoH(ctx context.Context, host string) ([]net.IPAddr, 
 		respA, err := r.Transport.Exchange(ctx, msgA, server)
 		if err != nil {
 			return nil, server, err
+		}
+
+		// Check DNS error codes before parsing answers
+		switch respA.Rcode {
+		case dns.RcodeSuccess:
+			// ok
+		case dns.RcodeNameError:
+			return nil, server, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+		case dns.RcodeServerFailure:
+			return nil, server, &net.DNSError{Err: "server misbehaving", Name: host}
+		case dns.RcodeRefused:
+			return nil, server, &net.DNSError{Err: "refused", Name: host}
+		default:
+			return nil, server, fmt.Errorf("dns: unexpected rcode %d for %s", respA.Rcode, host)
 		}
 
 		// Check for CNAME in the answer
