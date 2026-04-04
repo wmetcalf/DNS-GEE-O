@@ -22,6 +22,7 @@ func main() {
 	var lolfsaasDBPath string
 	var pretty bool
 	var checkMalicious bool
+	var doh bool
 	var enableWhois bool
 	var whoisToolPath string
 	var whoisPython string
@@ -42,6 +43,8 @@ func main() {
 	flag.StringVar(&lolfsaasDBPath, "lolfsaas-db", os.Getenv("DNSGEEO_LOLFSAAS_DB"), "Path to LOLFSaaS data.json")
 	flag.BoolVar(&pretty, "pretty", false, "Pretty-print JSON")
 	flag.BoolVar(&checkMalicious, "check-malicious", true, "Check domains against Quad9 threat intelligence")
+	dohDefault := os.Getenv("DNSGEEO_DOH") == "true"
+	flag.BoolVar(&doh, "doh", dohDefault, "Use DNS over HTTPS (RFC 8484) for all DNS queries")
 	flag.BoolVar(&enableWhois, "whois", true, "Include WHOIS/RDAP data via external tool")
 	flag.StringVar(&whoisToolPath, "whois-tool", "", "Path to whois_rdap.py (used with --whois)")
 	flag.StringVar(&whoisPython, "whois-python", "python3", "Python executable for whois_rdap.py")
@@ -78,6 +81,7 @@ func main() {
 			lolfsaasDB:     &lolfsaasDBPath,
 			pretty:         &pretty,
 			checkMalicious: &checkMalicious,
+			doh:            &doh,
 			enableWhois:    &enableWhois,
 			whoisToolPath:  &whoisToolPath,
 			whoisPython:    &whoisPython,
@@ -179,6 +183,7 @@ func main() {
 		Parallelism:    parallel,
 		PreferIPv6:     preferIPv6,
 		CheckMalicious: checkMalicious,
+		DoH:            doh,
 		EnableWhois:    enableWhois,
 		WhoisToolPath:  whoisToolPath,
 		WhoisPython:    whoisPython,
@@ -191,6 +196,29 @@ func main() {
 	}
 
 	resolver := dnsgeeo.NewRRResolver(cfg.DNSServers)
+	resolver.PreferIPv6 = cfg.PreferIPv6
+
+	var transport dnsgeeo.DNSTransport
+	if cfg.DoH {
+		// Validate all configured DNS servers have known DoH mappings
+		for _, s := range cfg.DNSServers {
+			if _, err := dnsgeeo.ResolveDoHURL(s); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
+		transport = dnsgeeo.NewDoHTransport()
+		resolver.Transport = transport
+	} else {
+		// Reject https:// URLs in --dns when --doh is not enabled
+		for _, s := range cfg.DNSServers {
+			if strings.HasPrefix(s, "https://") {
+				fmt.Fprintf(os.Stderr, "server %s is an HTTPS URL; did you mean to use --doh?\n", s)
+				os.Exit(2)
+			}
+		}
+	}
+
 	city, asn, err := dnsgeeo.OpenDBs(&cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "DB error:", err)
@@ -217,7 +245,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn, lolfsaasDB)
+	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn, lolfsaasDB, transport)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Lookup error:", err)
 		os.Exit(1)

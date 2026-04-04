@@ -118,6 +118,35 @@ func TestApplyConfigValuesParsesDbUpdateHours(t *testing.T) {
 	}
 }
 
+func TestApplyConfigValuesParsesDoH(t *testing.T) {
+	cfg := map[string]string{"doh": "true"}
+	val := false
+	opts := cliOptions{doh: &val}
+
+	if err := applyConfigValues(cfg, map[string]bool{}, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !val {
+		t.Fatal("expected doh to be true from config")
+	}
+}
+
+func TestApplyConfigValuesDoHRespectsFlag(t *testing.T) {
+	cfg := map[string]string{"doh": "true"}
+	val := false
+	opts := cliOptions{doh: &val}
+	setFlags := map[string]bool{"doh": true}
+
+	if err := applyConfigValues(cfg, setFlags, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if val {
+		t.Fatal("expected CLI flag to win over config file")
+	}
+}
+
 func TestResolveConfigPathSearchesDefaults(t *testing.T) {
 	tmp := t.TempDir()
 	first := filepath.Join(tmp, "first.conf")

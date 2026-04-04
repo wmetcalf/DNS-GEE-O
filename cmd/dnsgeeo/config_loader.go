@@ -21,6 +21,7 @@ type cliOptions struct {
 	lolfsaasDB     *string
 	pretty         *bool
 	checkMalicious *bool
+	doh            *bool
 	enableWhois    *bool
 	whoisToolPath  *string
 	whoisPython    *string
@@ -179,6 +180,14 @@ func applyConfigValues(values map[string]string, setFlags map[string]bool, opts 
 					return fmt.Errorf("check-malicious must be a boolean: %w", err)
 				}
 				*opts.checkMalicious = parsed
+			}
+		case "doh":
+			if opts.doh != nil && !setFlags["doh"] {
+				parsed, err := strconv.ParseBool(val)
+				if err != nil {
+					return fmt.Errorf("doh must be a boolean: %w", err)
+				}
+				*opts.doh = parsed
 			}
 		case "whois":
 			if opts.enableWhois != nil && !setFlags["whois"] {
