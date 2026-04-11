@@ -245,7 +245,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn, lolfsaasDB, transport)
+	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn, lolfsaasDB, transport, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Lookup error:", err)
 		os.Exit(1)

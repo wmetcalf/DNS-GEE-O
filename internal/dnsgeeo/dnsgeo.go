@@ -27,6 +27,9 @@ type Config struct {
 	PreferIPv6     bool
 	CheckMalicious bool
 	DoH            bool
+	Signals        bool
+	SignalsRedis   string
+	TrancoTier     string
 	EnableWhois    bool
 	WhoisToolPath  string
 	WhoisPython    string
@@ -61,15 +64,17 @@ type IPEnriched struct {
 }
 
 type HostResult struct {
-	Domain     string         `json:"domain"`
-	Resolved   bool           `json:"resolved"`
-	DNSServer  string         `json:"dns_server,omitempty"`
-	Malicious  *bool          `json:"malicious,omitempty"`
-	IPs        []IPEnriched   `json:"ips,omitempty"`
-	Whois      *WhoisToolInfo `json:"whois,omitempty"`
-	WhoisError string         `json:"whois_error,omitempty"`
-	LOLFSaaS   *LOLFSaaSMatch `json:"lolfsaas,omitempty"`
-	Error      string         `json:"error,omitempty"`
+	Domain       string         `json:"domain"`
+	Resolved     bool           `json:"resolved"`
+	DNSServer    string         `json:"dns_server,omitempty"`
+	Malicious    *bool          `json:"malicious,omitempty"`
+	IPs          []IPEnriched   `json:"ips,omitempty"`
+	Whois        *WhoisToolInfo `json:"whois,omitempty"`
+	WhoisError   string         `json:"whois_error,omitempty"`
+	LOLFSaaS     *LOLFSaaSMatch `json:"lolfsaas,omitempty"`
+	Signals      *SignalResult  `json:"signals,omitempty"`
+	SignalsError string         `json:"signals_error,omitempty"`
+	Error        string         `json:"error,omitempty"`
 }
 
 // -------------- Resolver ---------------
@@ -326,7 +331,7 @@ func CheckMaliciousDomain(ctx context.Context, domain string, timeout time.Durat
 
 // -------------- Core logic -------------
 
-func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, cfg *Config, cityDB *geoip2.Reader, asnDB *geoip2.Reader, lolfsaasDB *LOLFSaaSDB, transport DNSTransport) ([]HostResult, error) {
+func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, cfg *Config, cityDB *geoip2.Reader, asnDB *geoip2.Reader, lolfsaasDB *LOLFSaaSDB, transport DNSTransport, signals *SignalEngine) ([]HostResult, error) {
 	timeout := cfg.LookupTimeout
 	if timeout <= 0 {
 		timeout = 2 * time.Second
@@ -438,6 +443,19 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 			}
 			if match := lolfsaasDB.Match(host); match != nil {
 				result.LOLFSaaS = match
+			}
+			if signals != nil {
+				// Collect nameservers from WHOIS if available
+				var nameservers []string
+				if result.Whois != nil {
+					nameservers = result.Whois.NameServers
+				}
+				sigResult, sigErr := signals.Lookup(ctx, host, nameservers)
+				if sigErr != nil {
+					result.SignalsError = sigErr.Error()
+				} else {
+					result.Signals = sigResult
+				}
 			}
 			results[idx] = result
 		}(i, raw)
