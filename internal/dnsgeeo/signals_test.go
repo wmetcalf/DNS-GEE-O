@@ -1,7 +1,10 @@
 package dnsgeeo
 
 import (
+	"context"
 	"testing"
+
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestDecomposeSuffixes(t *testing.T) {
@@ -45,5 +48,147 @@ func TestExtractTLD(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("extractTLD(%q) = %q, want %q", tt.domain, got, tt.want)
 		}
+	}
+}
+
+func setupTestRedis(t *testing.T) (*miniredis.Miniredis, *SignalEngine) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+
+	// Populate test data
+	mr.SAdd("signals:url_shorteners", "bit.ly", "t.co", "tinyurl.com")
+	mr.SAdd("signals:free_subdomain_hosts", "github.io", "herokuapp.com", "workers.dev")
+	mr.SAdd("signals:free_file_hosts", "drive.google.com", "dropbox.com")
+	mr.SAdd("signals:free_email_providers", "gmail.com", "yahoo.com")
+	mr.SAdd("signals:disposable_email_providers", "tempmail.com", "throwaway.email")
+	mr.SAdd("signals:suspicious_tlds", "xyz", "top", "buzz")
+	mr.SAdd("signals:afraid_public_reg", "mooo.com", "chickenkiller.com")
+	mr.SAdd("signals:parked_nameservers", "parkingcrew.net", "sedoparking.com")
+	mr.ZAdd("signals:tranco", 1, "google.com")
+	mr.ZAdd("signals:tranco", 57, "github.com")
+	mr.HSet("signals:lolfsaas", "workers.dev", `{"name":"Cloudflare Workers","category":"Cloud","abuse":{"phishing":1,"c2":1,"exfil":0,"payload":0,"creds":0},"matched_pattern":"*.workers.dev"}`)
+	mr.HSet("signals:lolfsaas", "duckdns.org", `{"name":"DuckDNS","category":"C2 Channel","abuse":{"phishing":1,"c2":1,"exfil":0,"payload":0,"creds":0},"matched_pattern":"*.duckdns.org"}`)
+	mr.HSet("signals:psl_private", "github.io", "GitHub, Inc.")
+	mr.HSet("signals:psl_private", "herokuapp.com", "Heroku, Inc.")
+	mr.HSet("signals:ddns_suffixes", "duckdns.org", "duckdns")
+	mr.HSet("signals:ddns_suffixes", "ddns.net", "noip")
+
+	engine, err := NewSignalEngine("redis://" + mr.Addr())
+	if err != nil {
+		t.Fatalf("NewSignalEngine failed: %v", err)
+	}
+	t.Cleanup(func() { engine.Close() })
+	return mr, engine
+}
+
+func TestLookup_URLShortener(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "bit.ly", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.URLShortener {
+		t.Error("expected url_shortener=true for bit.ly")
+	}
+}
+
+func TestLookup_FreeSubdomainHost(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "evil.github.io", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.FreeSubdomainHost {
+		t.Error("expected free_subdomain_host=true for evil.github.io")
+	}
+	if !result.PSLIsPrivate {
+		t.Error("expected psl_is_private=true for evil.github.io")
+	}
+	if result.PSLPrivateOwner != "GitHub, Inc." {
+		t.Errorf("expected psl_private_owner='GitHub, Inc.', got %q", result.PSLPrivateOwner)
+	}
+}
+
+func TestLookup_SuspiciousTLD(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "scam.xyz", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.SuspiciousTLD {
+		t.Error("expected suspicious_tld=true for scam.xyz")
+	}
+}
+
+func TestLookup_TrancoRank(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "github.com", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if result.TrancoRank == nil || *result.TrancoRank != 57 {
+		t.Errorf("expected tranco_rank=57, got %v", result.TrancoRank)
+	}
+}
+
+func TestLookup_LOLFSaaS(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "evil.workers.dev", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if result.LOLFSaaS == nil {
+		t.Fatal("expected lolfsaas match for evil.workers.dev")
+	}
+	if result.LOLFSaaS.Name != "Cloudflare Workers" {
+		t.Errorf("expected name='Cloudflare Workers', got %q", result.LOLFSaaS.Name)
+	}
+}
+
+func TestLookup_DDNSProvider(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "evil.duckdns.org", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if result.DDNSProvider != "duckdns" {
+		t.Errorf("expected ddns_provider='duckdns', got %q", result.DDNSProvider)
+	}
+}
+
+func TestLookup_AfraidPublicReg(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "evil.mooo.com", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.AfraidPublicReg {
+		t.Error("expected afraid_public_reg=true for evil.mooo.com")
+	}
+}
+
+func TestLookup_CleanDomain(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "google.com", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if result.URLShortener || result.FreeSubdomainHost || result.SuspiciousTLD || result.AfraidPublicReg {
+		t.Error("expected no flags set for google.com")
+	}
+	if result.TrancoRank == nil || *result.TrancoRank != 1 {
+		t.Errorf("expected tranco_rank=1 for google.com, got %v", result.TrancoRank)
+	}
+}
+
+func TestLookup_ParkedNameservers(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	nameservers := []string{"ns1.parkingcrew.net", "ns2.parkingcrew.net"}
+	result, err := engine.Lookup(context.Background(), "parked-domain.com", nameservers)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.ParkedNameservers {
+		t.Error("expected parked_nameservers=true when NS matches parked list")
 	}
 }
