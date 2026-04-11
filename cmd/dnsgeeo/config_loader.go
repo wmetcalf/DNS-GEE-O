@@ -22,6 +22,9 @@ type cliOptions struct {
 	pretty         *bool
 	checkMalicious *bool
 	doh            *bool
+	signals        *bool
+	signalsRedis   *string
+	trancoTier     *string
 	enableWhois    *bool
 	whoisToolPath  *string
 	whoisPython    *string
@@ -188,6 +191,22 @@ func applyConfigValues(values map[string]string, setFlags map[string]bool, opts 
 					return fmt.Errorf("doh must be a boolean: %w", err)
 				}
 				*opts.doh = parsed
+			}
+		case "signals":
+			if opts.signals != nil && !setFlags["signals"] {
+				parsed, err := strconv.ParseBool(val)
+				if err != nil {
+					return fmt.Errorf("signals must be a boolean: %w", err)
+				}
+				*opts.signals = parsed
+			}
+		case "signals-redis":
+			if opts.signalsRedis != nil && !setFlags["signals-redis"] {
+				*opts.signalsRedis = val
+			}
+		case "tranco-tier":
+			if opts.trancoTier != nil && !setFlags["tranco-tier"] {
+				*opts.trancoTier = val
 			}
 		case "whois":
 			if opts.enableWhois != nil && !setFlags["whois"] {

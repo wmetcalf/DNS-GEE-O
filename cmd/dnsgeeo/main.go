@@ -23,6 +23,9 @@ func main() {
 	var pretty bool
 	var checkMalicious bool
 	var doh bool
+	var signals bool
+	var signalsRedis string
+	var trancoTier string
 	var enableWhois bool
 	var whoisToolPath string
 	var whoisPython string
@@ -45,6 +48,21 @@ func main() {
 	flag.BoolVar(&checkMalicious, "check-malicious", true, "Check domains against Quad9 threat intelligence")
 	dohDefault := os.Getenv("DNSGEEO_DOH") == "true"
 	flag.BoolVar(&doh, "doh", dohDefault, "Use DNS over HTTPS (RFC 8484) for all DNS queries")
+	signalsDefault := os.Getenv("DNSGEEO_SIGNALS") == "true"
+	flag.BoolVar(&signals, "signals", signalsDefault, "Enable Redis-backed domain signal lookups")
+	signalsRedisDefault := os.Getenv("DNSGEEO_SIGNALS_REDIS")
+	if signalsRedisDefault == "" {
+		signalsRedisDefault = os.Getenv("DNSGEEO_WHOIS_REDIS_URL")
+	}
+	if signalsRedisDefault == "" {
+		signalsRedisDefault = "redis://localhost:6379/0"
+	}
+	flag.StringVar(&signalsRedis, "signals-redis", signalsRedisDefault, "Redis URL for signal lookups")
+	trancoTierDefault := os.Getenv("DNSGEEO_TRANCO_TIER")
+	if trancoTierDefault == "" {
+		trancoTierDefault = "10k"
+	}
+	flag.StringVar(&trancoTier, "tranco-tier", trancoTierDefault, "Tranco dataset tier: 10k, 50k, 1m")
 	flag.BoolVar(&enableWhois, "whois", true, "Include WHOIS/RDAP data via external tool")
 	flag.StringVar(&whoisToolPath, "whois-tool", "", "Path to whois_rdap.py (used with --whois)")
 	flag.StringVar(&whoisPython, "whois-python", "python3", "Python executable for whois_rdap.py")
@@ -82,6 +100,9 @@ func main() {
 			pretty:         &pretty,
 			checkMalicious: &checkMalicious,
 			doh:            &doh,
+			signals:        &signals,
+			signalsRedis:   &signalsRedis,
+			trancoTier:     &trancoTier,
 			enableWhois:    &enableWhois,
 			whoisToolPath:  &whoisToolPath,
 			whoisPython:    &whoisPython,
@@ -184,6 +205,9 @@ func main() {
 		PreferIPv6:     preferIPv6,
 		CheckMalicious: checkMalicious,
 		DoH:            doh,
+		Signals:        signals,
+		SignalsRedis:   signalsRedis,
+		TrancoTier:     trancoTier,
 		EnableWhois:    enableWhois,
 		WhoisToolPath:  whoisToolPath,
 		WhoisPython:    whoisPython,

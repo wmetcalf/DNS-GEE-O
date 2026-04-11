@@ -187,3 +187,25 @@ func TestResolveConfigPathExplicitMissing(t *testing.T) {
 		t.Fatalf("expected os.ErrNotExist, got %v", err)
 	}
 }
+
+func TestApplyConfigValuesParsesSignals(t *testing.T) {
+	cfg := map[string]string{"signals": "true", "signals-redis": "redis://myhost:6379/1", "tranco-tier": "50k"}
+	signals := false
+	signalsRedis := ""
+	trancoTier := "10k"
+	opts := cliOptions{signals: &signals, signalsRedis: &signalsRedis, trancoTier: &trancoTier}
+
+	if err := applyConfigValues(cfg, map[string]bool{}, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !signals {
+		t.Fatal("expected signals=true from config")
+	}
+	if signalsRedis != "redis://myhost:6379/1" {
+		t.Fatalf("expected signals-redis from config, got %q", signalsRedis)
+	}
+	if trancoTier != "50k" {
+		t.Fatalf("expected tranco-tier=50k from config, got %q", trancoTier)
+	}
+}
