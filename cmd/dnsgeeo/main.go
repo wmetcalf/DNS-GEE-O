@@ -243,6 +243,17 @@ func main() {
 		}
 	}
 
+	var signalEngine *dnsgeeo.SignalEngine
+	if cfg.Signals {
+		var err error
+		signalEngine, err = dnsgeeo.NewSignalEngine(cfg.SignalsRedis)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer signalEngine.Close()
+	}
+
 	city, asn, err := dnsgeeo.OpenDBs(&cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "DB error:", err)
@@ -269,7 +280,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn, lolfsaasDB, transport, nil)
+	results, err := dnsgeeo.ResolveAndEnrichBatch(ctx, resolver, inputs, &cfg, city, asn, lolfsaasDB, transport, signalEngine)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Lookup error:", err)
 		os.Exit(1)
