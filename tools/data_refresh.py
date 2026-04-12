@@ -100,6 +100,20 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         log("Downloading dyn-dns-list...")
         download_url(DYNDSN_URL, dyndns_dest)
 
+    # Download cenk/nrd (newly registered domains, 30-day rolling window)
+    NRD_URL = "https://dl.cenk.app/nrd/nrd-last-30-days.txt"
+    nrd_dest = os.path.join(sublime_dir, "nrd-last-30-days.txt")
+    if needs_refresh(nrd_dest, refresh_hours):
+        log("Downloading newly registered domains (30-day)...")
+        download_url(NRD_URL, nrd_dest)
+
+    # Download brianhama/bad-asn-list
+    BAD_ASN_URL = "https://raw.githubusercontent.com/brianhama/bad-asn-list/master/bad-asn-list.csv"
+    bad_asn_dest = os.path.join(sublime_dir, "bad-asn-list.csv")
+    if needs_refresh(bad_asn_dest, refresh_hours):
+        log("Downloading bad ASN list...")
+        download_url(BAD_ASN_URL, bad_asn_dest)
+
     # Download Tranco
     tranco_file = TRANCO_FILES.get(tranco_tier, "tranco_top_10k.csv")
     tranco_dest = os.path.join(sublime_dir, tranco_file)
@@ -252,6 +266,41 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                     if domain and provider:
                         pipe.hset("signals:ddns_domains", domain, provider)
 
+    # Load newly registered domains as set
+    if os.path.exists(nrd_dest):
+        pipe.delete("signals:nrd")
+        with open(nrd_dest) as f:
+            entries = [line.strip().lower() for line in f
+                       if line.strip() and not line.startswith("#")]
+        if entries:
+            pipe.sadd("signals:nrd", *entries)
+            log(f"NRD: {len(entries)} domains loaded")
+
+    # Load bad ASNs as set (store ASN numbers as strings)
+    if os.path.exists(bad_asn_dest):
+        pipe.delete("signals:bad_asns")
+        with open(bad_asn_dest) as f:
+            asn_map = {}
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("ASN,"):
+                    continue
+                parts = line.split(",", 1)
+                if len(parts) >= 1:
+                    try:
+                        asn_num = str(int(parts[0].strip()))
+                        entity = parts[1].strip().strip('"') if len(parts) > 1 else ""
+                        asn_map[asn_num] = entity
+                    except ValueError:
+                        continue
+            if asn_map:
+                pipe.delete("signals:bad_asn_names")
+                for asn_num, entity in asn_map.items():
+                    pipe.sadd("signals:bad_asns", asn_num)
+                    if entity:
+                        pipe.hset("signals:bad_asn_names", asn_num, entity)
+                log(f"Bad ASNs: {len(asn_map)} loaded")
+
     # Set refresh timestamp
     import time as timemod
     pipe.set("signals:last_refresh", str(int(timemod.time())))
@@ -279,7 +328,7 @@ def refresh_geoip(refresh_hours):
 
 
 def main():
-    refresh_hours = int(os.environ.get("DNSGEEO_DATA_REFRESH_HOURS", "96") or "96")
+    refresh_hours = int(os.environ.get("DNSGEEO_DATA_REFRESH_HOURS", "24") or "24")
     force = os.environ.get("DNSGEEO_DATA_FORCE_REFRESH", "0") == "1"
 
     lolfsaas_path = os.environ.get("DNSGEEO_LOLFSAAS_DB", "/app/data/lolfsaas.json")

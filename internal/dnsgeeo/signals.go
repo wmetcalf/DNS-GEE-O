@@ -26,6 +26,10 @@ type SignalResult struct {
 	DDNSProvider            string         `json:"ddns_provider,omitempty"`
 	DDNSDomain              string         `json:"ddns_domain,omitempty"`
 	DDNSDomainProvider      string         `json:"ddns_domain_provider,omitempty"`
+	NewlyRegistered         bool           `json:"newly_registered"`
+	BadASN                  bool           `json:"bad_asn"`
+	BadASNNumber            uint           `json:"bad_asn_number,omitempty"`
+	BadASNEntity            string         `json:"bad_asn_entity,omitempty"`
 	LOLFSaaS                *LOLFSaaSMatch `json:"lolfsaas,omitempty"`
 }
 
@@ -78,7 +82,8 @@ func extractTLD(domain string) string {
 
 // Lookup checks a domain against all signal data in Redis.
 // nameservers is optional — pass WHOIS NS data if available, nil otherwise.
-func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []string) (*SignalResult, error) {
+// asnNumbers is optional — pass ASN numbers from resolved IPs to check against bad ASN list.
+func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []string, asnNumbers []uint) (*SignalResult, error) {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" {
 		return &SignalResult{}, nil
@@ -150,6 +155,29 @@ func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []
 	ddnsDomainCmds = append(ddnsDomainCmds, hashCheck{domain, pipe.HGet(ctx, "signals:ddns_domains", domain)})
 	for _, sfx := range suffixes {
 		ddnsDomainCmds = append(ddnsDomainCmds, hashCheck{sfx, pipe.HGet(ctx, "signals:ddns_domains", sfx)})
+	}
+
+	// NRD — check domain and suffixes
+	nrdDomainCmd := pipe.SIsMember(ctx, "signals:nrd", domain)
+	var nrdSuffixCmds []suffixCheck
+	for _, sfx := range suffixes {
+		nrdSuffixCmds = append(nrdSuffixCmds, suffixCheck{sfx, pipe.SIsMember(ctx, "signals:nrd", sfx)})
+	}
+
+	// Bad ASNs — check each ASN number from resolved IPs
+	type asnCheck struct {
+		asn uint
+		cmd *redis.BoolCmd
+		nameCmd *redis.StringCmd
+	}
+	var badASNCmds []asnCheck
+	for _, asn := range asnNumbers {
+		asnStr := fmt.Sprintf("%d", asn)
+		badASNCmds = append(badASNCmds, asnCheck{
+			asn:     asn,
+			cmd:     pipe.SIsMember(ctx, "signals:bad_asns", asnStr),
+			nameCmd: pipe.HGet(ctx, "signals:bad_asn_names", asnStr),
+		})
 	}
 
 	// Execute pipeline. redis.Nil errors are expected for HGET misses and ZSCORE
@@ -243,6 +271,31 @@ func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []
 		if provider, err := sc.cmd.Result(); err == nil {
 			result.DDNSDomain = sc.suffix
 			result.DDNSDomainProvider = provider
+			break
+		}
+	}
+
+	// NRD — check domain first, then suffixes
+	if v, _ := nrdDomainCmd.Result(); v {
+		result.NewlyRegistered = true
+	}
+	if !result.NewlyRegistered {
+		for _, sc := range nrdSuffixCmds {
+			if v, _ := sc.cmd.Result(); v {
+				result.NewlyRegistered = true
+				break
+			}
+		}
+	}
+
+	// Bad ASN — check each resolved IP's ASN
+	for _, ac := range badASNCmds {
+		if v, _ := ac.cmd.Result(); v {
+			result.BadASN = true
+			result.BadASNNumber = ac.asn
+			if entity, err := ac.nameCmd.Result(); err == nil {
+				result.BadASNEntity = entity
+			}
 			break
 		}
 	}

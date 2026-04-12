@@ -74,6 +74,10 @@ func setupTestRedis(t *testing.T) (*miniredis.Miniredis, *SignalEngine) {
 	mr.HSet("signals:ddns_suffixes", "ddns.net", "noip")
 	mr.HSet("signals:ddns_domains", "mooo.com", "afraid.org")
 	mr.HSet("signals:ddns_domains", "duckdns.org", "duckdns.org")
+	mr.SAdd("signals:nrd", "newlycreated.com", "fresh-phish.xyz")
+	mr.SAdd("signals:bad_asns", "53667", "12345")
+	mr.HSet("signals:bad_asn_names", "53667", "PONYNET")
+	mr.HSet("signals:bad_asn_names", "12345", "Evil Hosting Corp")
 
 	engine, err := NewSignalEngine("redis://" + mr.Addr())
 	if err != nil {
@@ -85,7 +89,7 @@ func setupTestRedis(t *testing.T) (*miniredis.Miniredis, *SignalEngine) {
 
 func TestLookup_URLShortener(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "bit.ly", nil)
+	result, err := engine.Lookup(context.Background(), "bit.ly", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -96,7 +100,7 @@ func TestLookup_URLShortener(t *testing.T) {
 
 func TestLookup_FreeSubdomainHost(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "evil.github.io", nil)
+	result, err := engine.Lookup(context.Background(), "evil.github.io", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -113,7 +117,7 @@ func TestLookup_FreeSubdomainHost(t *testing.T) {
 
 func TestLookup_SuspiciousTLD(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "scam.xyz", nil)
+	result, err := engine.Lookup(context.Background(), "scam.xyz", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -124,7 +128,7 @@ func TestLookup_SuspiciousTLD(t *testing.T) {
 
 func TestLookup_TrancoRank(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "github.com", nil)
+	result, err := engine.Lookup(context.Background(), "github.com", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -135,7 +139,7 @@ func TestLookup_TrancoRank(t *testing.T) {
 
 func TestLookup_LOLFSaaS(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "evil.workers.dev", nil)
+	result, err := engine.Lookup(context.Background(), "evil.workers.dev", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -149,7 +153,7 @@ func TestLookup_LOLFSaaS(t *testing.T) {
 
 func TestLookup_DDNSProvider(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "evil.duckdns.org", nil)
+	result, err := engine.Lookup(context.Background(), "evil.duckdns.org", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -160,7 +164,7 @@ func TestLookup_DDNSProvider(t *testing.T) {
 
 func TestLookup_AfraidPublicReg(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "evil.mooo.com", nil)
+	result, err := engine.Lookup(context.Background(), "evil.mooo.com", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -171,7 +175,7 @@ func TestLookup_AfraidPublicReg(t *testing.T) {
 
 func TestLookup_CleanDomain(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "google.com", nil)
+	result, err := engine.Lookup(context.Background(), "google.com", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -186,7 +190,7 @@ func TestLookup_CleanDomain(t *testing.T) {
 func TestLookup_ParkedNameservers(t *testing.T) {
 	_, engine := setupTestRedis(t)
 	nameservers := []string{"ns1.parkingcrew.net", "ns2.parkingcrew.net"}
-	result, err := engine.Lookup(context.Background(), "parked-domain.com", nameservers)
+	result, err := engine.Lookup(context.Background(), "parked-domain.com", nameservers, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -197,7 +201,7 @@ func TestLookup_ParkedNameservers(t *testing.T) {
 
 func TestLookup_DDNSDomain(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "evil.mooo.com", nil)
+	result, err := engine.Lookup(context.Background(), "evil.mooo.com", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -211,11 +215,61 @@ func TestLookup_DDNSDomain(t *testing.T) {
 
 func TestLookup_DDNSDomainDirect(t *testing.T) {
 	_, engine := setupTestRedis(t)
-	result, err := engine.Lookup(context.Background(), "mooo.com", nil)
+	result, err := engine.Lookup(context.Background(), "mooo.com", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
 	if result.DDNSDomain != "mooo.com" {
 		t.Errorf("expected ddns_domain='mooo.com' for direct lookup, got %q", result.DDNSDomain)
+	}
+}
+
+func TestLookup_NewlyRegistered(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "newlycreated.com", nil, nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.NewlyRegistered {
+		t.Error("expected newly_registered=true for newlycreated.com")
+	}
+}
+
+func TestLookup_NewlyRegisteredSubdomain(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "sub.fresh-phish.xyz", nil, nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.NewlyRegistered {
+		t.Error("expected newly_registered=true for sub.fresh-phish.xyz (parent in NRD list)")
+	}
+}
+
+func TestLookup_BadASN(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "example.com", nil, []uint{53667})
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if !result.BadASN {
+		t.Error("expected bad_asn=true for ASN 53667")
+	}
+	if result.BadASNNumber != 53667 {
+		t.Errorf("expected bad_asn_number=53667, got %d", result.BadASNNumber)
+	}
+	if result.BadASNEntity != "PONYNET" {
+		t.Errorf("expected bad_asn_entity='PONYNET', got %q", result.BadASNEntity)
+	}
+}
+
+func TestLookup_GoodASN(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "example.com", nil, []uint{15169})
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if result.BadASN {
+		t.Error("expected bad_asn=false for ASN 15169 (Google)")
 	}
 }

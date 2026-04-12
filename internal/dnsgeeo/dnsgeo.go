@@ -450,7 +450,14 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 				if result.Whois != nil {
 					nameservers = result.Whois.NameServers
 				}
-				sigResult, sigErr := signals.Lookup(ctx, host, nameservers)
+				// Collect ASN numbers from enriched IPs
+				var asnNumbers []uint
+				for _, ip := range enriched {
+					if ip.ASN != nil && ip.ASN.Number > 0 {
+						asnNumbers = append(asnNumbers, ip.ASN.Number)
+					}
+				}
+				sigResult, sigErr := signals.Lookup(ctx, host, nameservers, asnNumbers)
 				if sigErr != nil {
 					result.SignalsError = sigErr.Error()
 				} else {
