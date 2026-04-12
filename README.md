@@ -9,9 +9,11 @@ DNS-GEE-O is a high-performance concurrent DNS resolver and GeoIP enrichment CLI
 ## Features
 - **Concurrent DNS Resolution**: Resolve multiple domains in parallel with configurable concurrency (default: 64)
 - **Round-Robin DNS**: Distribute queries across multiple DNS servers (default: 8.8.8.8:53, 8.8.4.4:53)
+- **DNS over HTTPS (DoH)**: Optional RFC 8484 wire-format DoH for encrypted DNS queries (`--doh`)
 - **GeoIP Enrichment**: Add geographic location data (country, region, city, coordinates) to IP addresses
 - **ASN Lookup**: Identify Autonomous System Numbers and organizations
-- **Malicious Domain Detection**: Integrate with Quad9's threat intelligence to flag known malicious domains
+- **Malicious Domain Detection**: Integrate with Quad9's threat intelligence to flag known malicious domains (works over both UDP and DoH)
+- **Domain Signal Engine**: Optional Redis-backed threat intelligence lookups (`--signals`) — URL shorteners, free subdomain hosts, suspicious TLDs, newly registered domains, bad ASNs, DDNS providers, Tranco ranking, and more
 - **Optional WHOIS/RDAP**: External Python helper for WHOIS/RDAP metadata and domain age
 - **IPv4 and IPv6 Support**: Query both A and AAAA records
 - **IP Caching**: LRU cache (10,000 entries, 10-minute TTL) to avoid repeated GeoIP lookups
@@ -176,6 +178,86 @@ Or via the Go CLI:
 dnsgeeo --psl-private-list --pretty
 ```
 
+### DNS over HTTPS (DoH)
+
+Encrypt all DNS traffic using RFC 8484 wire-format DoH:
+
+```bash
+# Enable DoH (Google DNS by default)
+./bin/dnsgeeo --doh --pretty example.com
+
+# Custom DoH endpoint
+./bin/dnsgeeo --doh --dns "https://dns.google/dns-query" --pretty example.com
+```
+
+Known server mappings: `8.8.8.8`/`8.8.4.4` → `dns.google`, `9.9.9.9` → `dns.quad9.net` (malicious checks only). Unknown IPs with `--doh` require an `https://` URL in `--dns`.
+
+Environment variable: `DNSGEEO_DOH=true`
+
+### Domain Signal Engine
+
+Redis-backed threat intelligence lookups. Requires Redis and data loaded via `data_refresh.py`:
+
+```bash
+# Start Redis and load signal data
+docker run -d -p 6379:6379 redis:7-alpine
+DNSGEEO_SIGNALS=true DNSGEEO_DATA_REFRESH_HOURS=1 python3 tools/data_refresh.py
+
+# Query with signals
+./bin/dnsgeeo --signals --signals-redis redis://localhost:6379/0 --pretty bit.ly
+```
+
+Signal sources and what they detect:
+
+| Signal | Source | Description |
+|--------|--------|-------------|
+| `url_shortener` | [Sublime Security](https://github.com/sublime-security/static-files) + [PeterDaveHello](https://github.com/PeterDaveHello/url-shorteners) | ~1,700 URL shortener domains |
+| `free_subdomain_host` | Sublime Security | Free subdomain hosting (github.io, herokuapp.com, etc.) |
+| `free_file_host` | Sublime Security | Free file hosting services |
+| `free_email_provider` | Sublime Security | ~22k free email provider domains |
+| `disposable_email_provider` | Sublime Security | ~10k disposable/temporary email domains |
+| `suspicious_tld` | Sublime Security | TLDs frequently used in abuse |
+| `parked_nameservers` | Sublime Security | Detect parked/squatted domains by NS |
+| `tranco_rank` | [Tranco](https://tranco-list.eu/) via Sublime | Domain popularity ranking (10k/50k/1M) |
+| `afraid_public_reg` | [afraid.org scraper](data/afraid_public_domains.txt) | Domains allowing free public subdomain registration |
+| `ddns_provider` | Hardcoded + [dyn-dns-list](https://github.com/alexandrosmagos/dyn-dns-list) | DDNS provider detection (38k+ domains) |
+| `newly_registered` | [cenk/nrd](https://github.com/cenk/nrd) + WHOIS age | Domains registered in the last 30 days |
+| `bad_asn` | [brianhama/bad-asn-list](https://github.com/brianhama/bad-asn-list) | Known bulletproof/abuse-tolerant hosting ASNs |
+| `lolfsaas` | [LOLFSaaS](https://lolfsaas.github.io/) | Legitimate services abused for C2, phishing, exfil |
+| `psl_is_private` | [Public Suffix List](https://publicsuffix.org/) | Domain under a private PSL suffix (multi-tenant) |
+
+Example output with `--signals`:
+
+```json
+{
+  "domain": "evil.duckdns.org",
+  "resolved": true,
+  "malicious": true,
+  "signals": {
+    "url_shortener": false,
+    "free_subdomain_host": false,
+    "suspicious_tld": false,
+    "afraid_public_reg": false,
+    "newly_registered": false,
+    "bad_asn": false,
+    "tranco_rank": null,
+    "ddns_provider": "duckdns",
+    "ddns_domain": "duckdns.org",
+    "ddns_domain_provider": "duckdns.org",
+    "psl_is_private": false,
+    "lolfsaas": {
+      "name": "DuckDNS",
+      "category": "C2 Channel",
+      "abuse": {"phishing": 1, "c2": 1, "exfil": 0, "payload": 0, "creds": 0}
+    }
+  }
+}
+```
+
+Environment variables: `DNSGEEO_SIGNALS=true`, `DNSGEEO_SIGNALS_REDIS=redis://host:6379/0`, `DNSGEEO_TRANCO_TIER=1m`
+
+Data refreshes every 24 hours by default (`DNSGEEO_DATA_REFRESH_HOURS`). Atomic swap ensures zero query downtime during refresh.
+
 ### Custom DNS Servers
 
 ```bash
@@ -221,6 +303,10 @@ dnsgeeo --psl-private-list --pretty
 | `--city-db` | string | `$GEOLITE2_CITY_DB` | Path to GeoLite2-City.mmdb |
 | `--asn-db` | string | `$GEOLITE2_ASN_DB` | Path to GeoLite2-ASN.mmdb |
 | `--check-malicious` | bool | `true` | Check domains against Quad9 threat intelligence |
+| `--doh` | bool | `false` | Use DNS over HTTPS (RFC 8484) for all DNS queries |
+| `--signals` | bool | `false` | Enable Redis-backed domain signal lookups |
+| `--signals-redis` | string | `redis://localhost:6379/0` | Redis URL for signal lookups |
+| `--tranco-tier` | string | `10k` | Tranco dataset size: `10k`, `50k`, `1m` |
 | `--whois` | bool | `true` | Include WHOIS/RDAP data via external tool |
 | `--whois-tool` | string | | Path to `whois_rdap.py` |
 | `--whois-python` | string | `python3` | Python executable for `whois_rdap.py` |
@@ -244,6 +330,10 @@ check-malicious=true
 pretty=true
 parallel=64
 timeout-ms=2000
+doh=true
+signals=true
+signals-redis=redis://localhost:6379/0
+tranco-tier=1m
 whois=true
 whois-timeout-ms=20000
 city-db=./data/GeoLite2-City.mmdb
@@ -265,6 +355,10 @@ Environment variables:
 - `DNSGEEO_WHOIS_CACHE_TTL_HOURS` (default: 24; docker-compose sets 48)
 - `DNSGEEO_CITY_DB` / `DNSGEEO_ASN_DB` (override DB paths in container)
 - `DNSGEEO_WHOIS_TOOL` / `DNSGEEO_WHOIS_PYTHON` (override WHOIS helper paths)
+- `DNSGEEO_DOH` (default: `true` in Docker) - Enable DNS over HTTPS
+- `DNSGEEO_SIGNALS` (default: `true` in Docker) - Enable Redis-backed signal lookups
+- `DNSGEEO_TRANCO_TIER` (default: `1m` in Docker) - Tranco ranking dataset size
+- `DNSGEEO_DATA_REFRESH_HOURS` (default: 24) - How often to refresh signal data
 
 **Security Note:** Tool paths (`--whois-tool`, `--whois-python`) are **NOT exposed via API/MCP** for security. They can only be configured via CLI flags or environment variables on the server. API clients cannot inject custom tool paths. Python executables are validated against an allowlist or must be absolute paths, and tool paths must be `.py` files.
 
@@ -481,8 +575,15 @@ The `--parallel` flag controls **concurrency**, not **capacity**:
 ### Code Structure
 
 ```
-cmd/dnsgeeo/main.go          # CLI entrypoint, flag parsing
-internal/dnsgeeo/dnsgeeo.go   # Core resolution & enrichment logic
+cmd/dnsgeeo/main.go              # CLI entrypoint, flag parsing
+internal/dnsgeeo/dnsgeo.go       # Core resolution & enrichment logic
+internal/dnsgeeo/transport.go    # DNSTransport interface (UDP + DoH)
+internal/dnsgeeo/signals.go      # Redis-backed signal engine
+internal/dnsgeeo/lolfsaas.go     # LOLFSaaS file-based matching (non-signals path)
+tools/data_refresh.py            # Signal data download and Redis ingestion
+tools/api_server.py              # FastAPI REST server
+tools/mcp_server.py              # MCP server
+tools/server_common.py           # Shared Go binary invocation
 ```
 
 ### Key Components
@@ -507,6 +608,20 @@ internal/dnsgeeo/dnsgeeo.go   # Core resolution & enrichment logic
 - Detects blocked domains via NXDOMAIN with RA flag = 0
 - Checks **all domains** regardless of primary DNS resolution status (important for detecting malicious domains that may be blocked or unreachable)
 - Uses `miekg/dns` library for proper DNS message parsing
+- Works identically over both UDP and DoH (wire-format preserves all flags)
+
+**DNS over HTTPS (`DNSTransport`)**
+- `DNSTransport` interface with `UDPTransport` and `DoHTransport` implementations
+- RFC 8484 wire-format: `Pack()` → HTTPS POST → `Unpack()` — identical `dns.Msg` response
+- CNAME following (max 10 hops) for the DoH resolver path
+- Context-aware: respects timeouts and cancellation
+
+**Domain Signal Engine (`SignalEngine`)**
+- Redis-backed pipelined lookups — single round-trip per domain (~20 commands)
+- Suffix decomposition for wildcard matching (e.g., `evil.workers.dev` checks `workers.dev`)
+- 14 signal types from 10+ data sources
+- Atomic data refresh via staging keys + RENAME (zero query downtime)
+- Opt-in via `--signals`; no Redis dependency when disabled
 
 ## Examples Directory
 
@@ -522,7 +637,8 @@ See the [examples](examples/) directory for detailed use cases:
 
 - [github.com/oschwald/geoip2-golang](https://github.com/oschwald/geoip2-golang) - MaxMind GeoIP2 database reader
 - [github.com/hashicorp/golang-lru/v2](https://github.com/hashicorp/golang-lru) - Thread-safe expiring LRU cache
-- [github.com/miekg/dns](https://github.com/miekg/dns) - DNS library for raw DNS queries and flag parsing
+- [github.com/miekg/dns](https://github.com/miekg/dns) - DNS library for raw DNS queries, DoH wire-format, and flag parsing
+- [github.com/redis/go-redis/v9](https://github.com/redis/go-redis) - Redis client for signal engine lookups
 
 ## Notes on GeoIP Databases
 
