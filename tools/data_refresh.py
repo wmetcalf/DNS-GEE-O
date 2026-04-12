@@ -135,18 +135,27 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         log(f"Redis connection failed: {exc}")
         return
 
-    pipe = r.pipeline()
+    import json as jsonmod
+    import time as timemod
 
-    # Helper to load a text file into a Redis set
-    def load_set(filepath, redis_key):
+    # Write all data to staging keys, then atomically RENAME to live keys.
+    # This ensures queries never see empty/partial data during refresh.
+    S = ":staging"  # suffix for staging keys
+    pipe = r.pipeline()
+    rename_pairs = []  # (staging_key, live_key) to RENAME after pipeline
+
+    # Helper to load a text file into a staging Redis set
+    def load_set(filepath, live_key):
         if not os.path.exists(filepath):
             return
-        pipe.delete(redis_key)
+        staging = live_key + S
+        pipe.delete(staging)
         with open(filepath) as f:
             entries = [line.strip().lower() for line in f
                        if line.strip() and not line.startswith("#")]
         if entries:
-            pipe.sadd(redis_key, *entries)
+            pipe.sadd(staging, *entries)
+            rename_pairs.append((staging, live_key))
 
     # Load Sublime sets
     for filename, redis_key in SUBLIME_LISTS.items():
@@ -163,8 +172,10 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                     if line and not line.startswith("#"):
                         shortener_entries.add(line)
     if shortener_entries:
-        pipe.delete("signals:url_shorteners")
-        pipe.sadd("signals:url_shorteners", *shortener_entries)
+        staging = "signals:url_shorteners" + S
+        pipe.delete(staging)
+        pipe.sadd(staging, *shortener_entries)
+        rename_pairs.append((staging, "signals:url_shorteners"))
 
     # Load afraid public registration domains
     afraid_path = os.path.join(data_dir, "afraid_public_domains.txt")
@@ -172,7 +183,8 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
 
     # Load Tranco as sorted set
     if os.path.exists(tranco_dest):
-        pipe.delete("signals:tranco")
+        staging = "signals:tranco" + S
+        pipe.delete(staging)
         with open(tranco_dest) as f:
             mapping = {}
             for line in f:
@@ -188,42 +200,38 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                     except ValueError:
                         continue
             if mapping:
-                pipe.zadd("signals:tranco", mapping)
+                pipe.zadd(staging, mapping)
+                rename_pairs.append((staging, "signals:tranco"))
 
     # Load LOLFSaaS as hash
     lolfsaas_path = os.path.join(data_dir, "lolfsaas.json")
     if os.path.exists(lolfsaas_path):
-        import json as jsonmod
-        pipe.delete("signals:lolfsaas")
+        staging = "signals:lolfsaas" + S
+        pipe.delete(staging)
         with open(lolfsaas_path) as f:
-            entries = jsonmod.load(f)
-        for entry in entries:
+            lol_entries = jsonmod.load(f)
+        for entry in lol_entries:
             for domain in entry.get("domains", []):
                 domain = domain.strip().lower()
                 if not domain:
                     continue
+                blob = jsonmod.dumps({
+                    "name": entry.get("name", ""),
+                    "category": entry.get("category", ""),
+                    "abuse": entry.get("abuse", {}),
+                    "matched_pattern": domain,
+                })
                 if domain.startswith("*."):
-                    key = domain[2:]  # "*.workers.dev" → "workers.dev"
-                    blob = jsonmod.dumps({
-                        "name": entry.get("name", ""),
-                        "category": entry.get("category", ""),
-                        "abuse": entry.get("abuse", {}),
-                        "matched_pattern": domain,
-                    })
-                    pipe.hset("signals:lolfsaas", key, blob)
+                    pipe.hset(staging, domain[2:], blob)
                 else:
-                    blob = jsonmod.dumps({
-                        "name": entry.get("name", ""),
-                        "category": entry.get("category", ""),
-                        "abuse": entry.get("abuse", {}),
-                        "matched_pattern": domain,
-                    })
-                    pipe.hset("signals:lolfsaas", domain, blob)
+                    pipe.hset(staging, domain, blob)
+        rename_pairs.append((staging, "signals:lolfsaas"))
 
-    # Load PSL private suffixes — just track which suffixes are private (boolean)
+    # Load PSL private suffixes
     psl_path = os.path.join(data_dir, "public_suffix_list.dat")
     if os.path.exists(psl_path):
-        pipe.delete("signals:psl_private")
+        staging = "signals:psl_private" + S
+        pipe.delete(staging)
         in_private = False
         with open(psl_path) as f:
             for line in f:
@@ -235,7 +243,8 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                     continue
                 suffix = line.lstrip("*.!").lower()
                 if suffix:
-                    pipe.hset("signals:psl_private", suffix, "1")
+                    pipe.hset(staging, suffix, "1")
+        rename_pairs.append((staging, "signals:psl_private"))
 
     # Load DDNS suffix providers as hash
     ddns_suffixes = {
@@ -247,13 +256,16 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         "changeip.com": "changeip",
         "dnsexit.com": "dnsexit",
     }
-    pipe.delete("signals:ddns_suffixes")
+    staging = "signals:ddns_suffixes" + S
+    pipe.delete(staging)
     for suffix, provider in ddns_suffixes.items():
-        pipe.hset("signals:ddns_suffixes", suffix, provider)
+        pipe.hset(staging, suffix, provider)
+    rename_pairs.append((staging, "signals:ddns_suffixes"))
 
     # Load dyn-dns-list as hash (domain → provider)
     if os.path.exists(dyndns_dest):
-        pipe.delete("signals:ddns_domains")
+        staging = "signals:ddns_domains" + S
+        pipe.delete(staging)
         with open(dyndns_dest) as f:
             for line in f:
                 line = line.strip()
@@ -264,21 +276,27 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                     domain = parts[0].strip().lower()
                     provider = parts[2].strip().lower()
                     if domain and provider:
-                        pipe.hset("signals:ddns_domains", domain, provider)
+                        pipe.hset(staging, domain, provider)
+        rename_pairs.append((staging, "signals:ddns_domains"))
 
     # Load newly registered domains as set
     if os.path.exists(nrd_dest):
-        pipe.delete("signals:nrd")
+        staging = "signals:nrd" + S
+        pipe.delete(staging)
         with open(nrd_dest) as f:
-            entries = [line.strip().lower() for line in f
-                       if line.strip() and not line.startswith("#")]
-        if entries:
-            pipe.sadd("signals:nrd", *entries)
-            log(f"NRD: {len(entries)} domains loaded")
+            nrd_entries = [line.strip().lower() for line in f
+                          if line.strip() and not line.startswith("#")]
+        if nrd_entries:
+            pipe.sadd(staging, *nrd_entries)
+            rename_pairs.append((staging, "signals:nrd"))
+            log(f"NRD: {len(nrd_entries)} domains loaded")
 
-    # Load bad ASNs as set (store ASN numbers as strings)
+    # Load bad ASNs as set + names hash
     if os.path.exists(bad_asn_dest):
-        pipe.delete("signals:bad_asns")
+        staging_set = "signals:bad_asns" + S
+        staging_names = "signals:bad_asn_names" + S
+        pipe.delete(staging_set)
+        pipe.delete(staging_names)
         with open(bad_asn_dest) as f:
             asn_map = {}
             for line in f:
@@ -294,22 +312,29 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                     except ValueError:
                         continue
             if asn_map:
-                pipe.delete("signals:bad_asn_names")
                 for asn_num, entity in asn_map.items():
-                    pipe.sadd("signals:bad_asns", asn_num)
+                    pipe.sadd(staging_set, asn_num)
                     if entity:
-                        pipe.hset("signals:bad_asn_names", asn_num, entity)
+                        pipe.hset(staging_names, asn_num, entity)
+                rename_pairs.append((staging_set, "signals:bad_asns"))
+                rename_pairs.append((staging_names, "signals:bad_asn_names"))
                 log(f"Bad ASNs: {len(asn_map)} loaded")
 
-    # Set refresh timestamp
-    import time as timemod
     pipe.set("signals:last_refresh", str(int(timemod.time())))
 
     try:
         pipe.execute()
+        # Atomic swap: RENAME staging keys to live keys
+        rename_pipe = r.pipeline()
+        for staging_key, live_key in rename_pairs:
+            rename_pipe.rename(staging_key, live_key)
+        rename_pipe.execute()
         log("Signal data loaded into Redis")
     except Exception as exc:
         log(f"Redis pipeline failed: {exc}")
+        # Clean up staging keys on failure
+        for staging_key, _ in rename_pairs:
+            r.delete(staging_key)
 
 
 def refresh_geoip(refresh_hours):
