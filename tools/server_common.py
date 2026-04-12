@@ -51,6 +51,7 @@ def run_dnsgeeo(
     whois_cache_ttl_hours: Optional[int] = None,
     whois_redis_url: Optional[str] = None,
     doh: Optional[bool] = None,
+    signals: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
     if not domains:
         raise ValueError("domains list is empty")
@@ -80,6 +81,11 @@ def run_dnsgeeo(
         args += ["--doh"]
     elif doh is None and os.getenv("DNSGEEO_DOH") == "true":
         args += ["--doh"]
+
+    if signals is True:
+        args += ["--signals"]
+    elif signals is None and os.getenv("DNSGEEO_SIGNALS") == "true":
+        args += ["--signals"]
 
     city_db = _existing_path(city_db or _default_city_db())
     asn_db = _existing_path(asn_db or _default_asn_db())

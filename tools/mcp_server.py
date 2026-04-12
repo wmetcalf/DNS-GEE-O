@@ -25,6 +25,7 @@ def dnsgeeo_resolve(
     whois: Optional[bool] = None,
     whois_timeout_ms: Optional[int] = None,
     doh: Optional[bool] = None,
+    signals: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Resolve domains to IPs with GeoIP and WHOIS enrichment.
@@ -52,6 +53,7 @@ def dnsgeeo_resolve(
         whois: Enable WHOIS/RDAP lookup (default: false)
         whois_timeout_ms: WHOIS timeout in milliseconds (default: 3000)
         doh: Use DNS over HTTPS for all queries (default: false, or DNSGEEO_DOH env var)
+        signals: Enable Redis-backed domain signal lookups (default: false, or DNSGEEO_SIGNALS env var)
 
     Returns:
         Dictionary with "results" key containing list of enriched domain data
@@ -68,6 +70,7 @@ def dnsgeeo_resolve(
         whois=whois,
         whois_timeout_ms=whois_timeout_ms,
         doh=doh,
+        signals=signals,
     )
     return {"results": results}
 

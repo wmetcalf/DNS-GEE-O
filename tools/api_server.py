@@ -22,6 +22,7 @@ class ResolveRequest(BaseModel):
     whois: Optional[bool] = None
     whois_timeout_ms: Optional[int] = None
     doh: Optional[bool] = None
+    signals: Optional[bool] = None
 
 
 app = FastAPI(title="DNS-GEE-O API", version="1.0.0")
@@ -47,6 +48,7 @@ def resolve(req: ResolveRequest) -> Dict[str, Any]:
             whois=req.whois,
             whois_timeout_ms=req.whois_timeout_ms,
             doh=req.doh,
+            signals=req.signals,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
