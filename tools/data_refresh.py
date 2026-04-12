@@ -93,6 +93,13 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         log("Downloading PeterDaveHello url-shorteners...")
         download_url(PETERDAVEHELLO_URL, pdh_dest)
 
+    # Download alexandrosmagos/dyn-dns-list
+    DYNDSN_URL = "https://raw.githubusercontent.com/alexandrosmagos/dyn-dns-list/master/links.csv"
+    dyndns_dest = os.path.join(sublime_dir, "dyn_dns_list.csv")
+    if needs_refresh(dyndns_dest, refresh_hours):
+        log("Downloading dyn-dns-list...")
+        download_url(DYNDSN_URL, dyndns_dest)
+
     # Download Tranco
     tranco_file = TRANCO_FILES.get(tranco_tier, "tranco_top_10k.csv")
     tranco_dest = os.path.join(sublime_dir, tranco_file)
@@ -229,6 +236,21 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
     pipe.delete("signals:ddns_suffixes")
     for suffix, provider in ddns_suffixes.items():
         pipe.hset("signals:ddns_suffixes", suffix, provider)
+
+    # Load dyn-dns-list as hash (domain → provider)
+    if os.path.exists(dyndns_dest):
+        pipe.delete("signals:ddns_domains")
+        with open(dyndns_dest) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("Domain,"):
+                    continue
+                parts = line.split(",", 3)
+                if len(parts) >= 3:
+                    domain = parts[0].strip().lower()
+                    provider = parts[2].strip().lower()
+                    if domain and provider:
+                        pipe.hset("signals:ddns_domains", domain, provider)
 
     # Set refresh timestamp
     import time as timemod

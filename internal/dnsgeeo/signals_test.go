@@ -72,6 +72,8 @@ func setupTestRedis(t *testing.T) (*miniredis.Miniredis, *SignalEngine) {
 	mr.HSet("signals:psl_private", "herokuapp.com", "Heroku, Inc.")
 	mr.HSet("signals:ddns_suffixes", "duckdns.org", "duckdns")
 	mr.HSet("signals:ddns_suffixes", "ddns.net", "noip")
+	mr.HSet("signals:ddns_domains", "mooo.com", "afraid.org")
+	mr.HSet("signals:ddns_domains", "duckdns.org", "duckdns.org")
 
 	engine, err := NewSignalEngine("redis://" + mr.Addr())
 	if err != nil {
@@ -190,5 +192,30 @@ func TestLookup_ParkedNameservers(t *testing.T) {
 	}
 	if !result.ParkedNameservers {
 		t.Error("expected parked_nameservers=true when NS matches parked list")
+	}
+}
+
+func TestLookup_DDNSDomain(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "evil.mooo.com", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if result.DDNSDomain != "mooo.com" {
+		t.Errorf("expected ddns_domain='mooo.com', got %q", result.DDNSDomain)
+	}
+	if result.DDNSDomainProvider != "afraid.org" {
+		t.Errorf("expected ddns_domain_provider='afraid.org', got %q", result.DDNSDomainProvider)
+	}
+}
+
+func TestLookup_DDNSDomainDirect(t *testing.T) {
+	_, engine := setupTestRedis(t)
+	result, err := engine.Lookup(context.Background(), "mooo.com", nil)
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+	if result.DDNSDomain != "mooo.com" {
+		t.Errorf("expected ddns_domain='mooo.com' for direct lookup, got %q", result.DDNSDomain)
 	}
 }

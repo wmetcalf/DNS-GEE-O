@@ -24,6 +24,8 @@ type SignalResult struct {
 	PSLPrivateSuffix        string         `json:"psl_private_suffix,omitempty"`
 	PSLPublicSuffix         string         `json:"psl_public_suffix,omitempty"`
 	DDNSProvider            string         `json:"ddns_provider,omitempty"`
+	DDNSDomain              string         `json:"ddns_domain,omitempty"`
+	DDNSDomainProvider      string         `json:"ddns_domain_provider,omitempty"`
 	LOLFSaaS                *LOLFSaaSMatch `json:"lolfsaas,omitempty"`
 }
 
@@ -137,10 +139,17 @@ func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []
 		pslCmds = append(pslCmds, hashCheck{sfx, pipe.HGet(ctx, "signals:psl_private", sfx)})
 	}
 
-	// DDNS — check suffixes
+	// DDNS — check suffixes against hardcoded provider list
 	var ddnsCmds []hashCheck
 	for _, sfx := range suffixes {
 		ddnsCmds = append(ddnsCmds, hashCheck{sfx, pipe.HGet(ctx, "signals:ddns_suffixes", sfx)})
+	}
+
+	// DDNS domains — check domain and suffixes against dyn-dns-list
+	var ddnsDomainCmds []hashCheck
+	ddnsDomainCmds = append(ddnsDomainCmds, hashCheck{domain, pipe.HGet(ctx, "signals:ddns_domains", domain)})
+	for _, sfx := range suffixes {
+		ddnsDomainCmds = append(ddnsDomainCmds, hashCheck{sfx, pipe.HGet(ctx, "signals:ddns_domains", sfx)})
 	}
 
 	// Execute pipeline. redis.Nil errors are expected for HGET misses and ZSCORE
@@ -225,6 +234,15 @@ func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []
 	for _, sc := range ddnsCmds {
 		if provider, err := sc.cmd.Result(); err == nil {
 			result.DDNSProvider = provider
+			break
+		}
+	}
+
+	// DDNS domain — longest match from dyn-dns-list
+	for _, sc := range ddnsDomainCmds {
+		if provider, err := sc.cmd.Result(); err == nil {
+			result.DDNSDomain = sc.suffix
+			result.DDNSDomainProvider = provider
 			break
 		}
 	}
