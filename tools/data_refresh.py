@@ -199,36 +199,22 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                     })
                     pipe.hset("signals:lolfsaas", domain, blob)
 
-    # Load PSL private suffixes as hash
+    # Load PSL private suffixes — just track which suffixes are private (boolean)
     psl_path = os.path.join(data_dir, "public_suffix_list.dat")
     if os.path.exists(psl_path):
         pipe.delete("signals:psl_private")
         in_private = False
-        current_owner = ""
         with open(psl_path) as f:
             for line in f:
                 line = line.strip()
                 if line == "// ===BEGIN PRIVATE DOMAINS===":
                     in_private = True
                     continue
-                if not in_private:
+                if not in_private or not line or line.startswith("//"):
                     continue
-                if not line:
-                    continue
-                if line.startswith("//"):
-                    # Extract owner from comment lines like "// GitHub, Inc.: https://..."
-                    if not line.startswith("// ==="):
-                        owner_text = line[2:].strip()
-                        # Strip URL/email after first colon if present
-                        if ":" in owner_text:
-                            owner_text = owner_text.split(":", 1)[0].strip()
-                        if owner_text:
-                            current_owner = owner_text
-                    continue
-                # Domain line
                 suffix = line.lstrip("*.!").lower()
                 if suffix:
-                    pipe.hset("signals:psl_private", suffix, current_owner)
+                    pipe.hset("signals:psl_private", suffix, "1")
 
     # Load DDNS suffix providers as hash
     ddns_suffixes = {
