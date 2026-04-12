@@ -6,7 +6,7 @@ x-dnsgeeo: &dnsgeeo
   environment:
     DNSGEEO_DOH: "true"
     DNSGEEO_SIGNALS: "true"
-    DNSGEEO_TRANCO_TIER: "50k"
+    DNSGEEO_TRANCO_TIER: "1m"
     DNSGEEO_WHOIS_REDIS_URL: redis://redis:6379/0
     DNSGEEO_WHOIS_CACHE_TTL_HOURS: "48"
     # MAXMIND_LICENSE_KEY: "YOUR_MAXMIND_LICENSE_KEY"
