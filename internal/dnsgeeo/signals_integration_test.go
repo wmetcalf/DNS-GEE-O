@@ -25,7 +25,7 @@ func TestSignalEngine_RealRedis(t *testing.T) {
 
 	// This test assumes data_refresh.py has been run with DNSGEEO_SIGNALS=true
 	// Test a known URL shortener
-	result, err := engine.Lookup(context.Background(), "bit.ly", nil)
+	result, err := engine.Lookup(context.Background(), "bit.ly", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestSignalEngine_RealRedis(t *testing.T) {
 	}
 
 	// Test a known clean domain with Tranco rank
-	result, err = engine.Lookup(context.Background(), "google.com", nil)
+	result, err = engine.Lookup(context.Background(), "google.com", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestSignalEngine_RealRedis(t *testing.T) {
 	}
 
 	// Test a LOLFSaaS domain
-	result, err = engine.Lookup(context.Background(), "test.workers.dev", nil)
+	result, err = engine.Lookup(context.Background(), "test.workers.dev", nil, nil)
 	if err != nil {
 		t.Fatalf("Lookup failed: %v", err)
 	}

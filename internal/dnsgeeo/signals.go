@@ -84,7 +84,7 @@ func extractTLD(domain string) string {
 // nameservers is optional — pass WHOIS NS data if available, nil otherwise.
 // asnNumbers is optional — pass ASN numbers from resolved IPs to check against bad ASN list.
 func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []string, asnNumbers []uint) (*SignalResult, error) {
-	domain = strings.ToLower(strings.TrimSpace(domain))
+	domain = strings.TrimRight(strings.ToLower(strings.TrimSpace(domain)), ".")
 	if domain == "" {
 		return &SignalResult{}, nil
 	}
@@ -95,18 +95,19 @@ func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []
 	pipe := e.client.Pipeline()
 
 	// Boolean set lookups (exact match on full domain)
-	urlShortCmd := pipe.SIsMember(ctx, "signals:url_shorteners", domain)
 	freeEmailCmd := pipe.SIsMember(ctx, "signals:free_email_providers", domain)
 	dispEmailCmd := pipe.SIsMember(ctx, "signals:disposable_email_providers", domain)
 	suspTLDCmd := pipe.SIsMember(ctx, "signals:suspicious_tlds", tld)
 
-	// Suffix-based set lookups — check each suffix
+	// Suffix-based set lookups — check domain and each suffix
 	type suffixCheck struct {
 		suffix string
 		cmd    *redis.BoolCmd
 	}
-	var freeSubChecks, freeFileChecks, afraidChecks []suffixCheck
+	var urlShortChecks, freeSubChecks, freeFileChecks, afraidChecks []suffixCheck
+	urlShortChecks = append(urlShortChecks, suffixCheck{domain, pipe.SIsMember(ctx, "signals:url_shorteners", domain)})
 	for _, sfx := range suffixes {
+		urlShortChecks = append(urlShortChecks, suffixCheck{sfx, pipe.SIsMember(ctx, "signals:url_shorteners", sfx)})
 		freeSubChecks = append(freeSubChecks, suffixCheck{sfx, pipe.SIsMember(ctx, "signals:free_subdomain_hosts", sfx)})
 		freeFileChecks = append(freeFileChecks, suffixCheck{sfx, pipe.SIsMember(ctx, "signals:free_file_hosts", sfx)})
 		afraidChecks = append(afraidChecks, suffixCheck{sfx, pipe.SIsMember(ctx, "signals:afraid_public_reg", sfx)})
@@ -191,7 +192,12 @@ func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []
 		PSLPublicSuffix: tld,
 	}
 
-	result.URLShortener, _ = urlShortCmd.Result()
+	for _, sc := range urlShortChecks {
+		if v, _ := sc.cmd.Result(); v {
+			result.URLShortener = true
+			break
+		}
+	}
 	result.FreeEmailProvider, _ = freeEmailCmd.Result()
 	result.DisposableEmailProvider, _ = dispEmailCmd.Result()
 	result.SuspiciousTLD, _ = suspTLDCmd.Result()

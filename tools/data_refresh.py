@@ -320,15 +320,15 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                 rename_pairs.append((staging_names, "signals:bad_asn_names"))
                 log(f"Bad ASNs: {len(asn_map)} loaded")
 
-    pipe.set("signals:last_refresh", str(int(timemod.time())))
-
     try:
         pipe.execute()
-        # Atomic swap: RENAME staging keys to live keys
-        rename_pipe = r.pipeline()
+        # Atomic swap: RENAME staging keys to live keys in a transaction
+        rename_pipe = r.pipeline(transaction=True)
         for staging_key, live_key in rename_pairs:
             rename_pipe.rename(staging_key, live_key)
         rename_pipe.execute()
+        # Update timestamp after successful swap
+        r.set("signals:last_refresh", str(int(timemod.time())))
         log("Signal data loaded into Redis")
     except Exception as exc:
         log(f"Redis pipeline failed: {exc}")
