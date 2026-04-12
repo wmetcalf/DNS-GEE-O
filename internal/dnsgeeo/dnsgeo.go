@@ -461,6 +461,9 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 				if sigErr != nil {
 					result.SignalsError = sigErr.Error()
 				} else {
+					if !sigResult.NewlyRegistered && result.Whois != nil && result.Whois.AgeDays != nil && *result.Whois.AgeDays < 30 {
+						sigResult.NewlyRegistered = true
+					}
 					result.Signals = sigResult
 				}
 			}
