@@ -107,13 +107,6 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         log("Downloading newly registered domains (30-day)...")
         download_url(NRD_URL, nrd_dest)
 
-    # Download brianhama/bad-asn-list
-    BAD_ASN_URL = "https://raw.githubusercontent.com/brianhama/bad-asn-list/master/bad-asn-list.csv"
-    bad_asn_dest = os.path.join(sublime_dir, "bad-asn-list.csv")
-    if needs_refresh(bad_asn_dest, refresh_hours):
-        log("Downloading bad ASN list...")
-        download_url(BAD_ASN_URL, bad_asn_dest)
-
     # Download Tranco
     tranco_file = TRANCO_FILES.get(tranco_tier, "tranco_top_10k.csv")
     tranco_dest = os.path.join(sublime_dir, tranco_file)
@@ -290,35 +283,6 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
             pipe.sadd(staging, *nrd_entries)
             rename_pairs.append((staging, "signals:nrd"))
             log(f"NRD: {len(nrd_entries)} domains loaded")
-
-    # Load bad ASNs as set + names hash
-    if os.path.exists(bad_asn_dest):
-        staging_set = "signals:bad_asns" + S
-        staging_names = "signals:bad_asn_names" + S
-        pipe.delete(staging_set)
-        pipe.delete(staging_names)
-        with open(bad_asn_dest) as f:
-            asn_map = {}
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("ASN,"):
-                    continue
-                parts = line.split(",", 1)
-                if len(parts) >= 1:
-                    try:
-                        asn_num = str(int(parts[0].strip()))
-                        entity = parts[1].strip().strip('"') if len(parts) > 1 else ""
-                        asn_map[asn_num] = entity
-                    except ValueError:
-                        continue
-            if asn_map:
-                for asn_num, entity in asn_map.items():
-                    pipe.sadd(staging_set, asn_num)
-                    if entity:
-                        pipe.hset(staging_names, asn_num, entity)
-                rename_pairs.append((staging_set, "signals:bad_asns"))
-                rename_pairs.append((staging_names, "signals:bad_asn_names"))
-                log(f"Bad ASNs: {len(asn_map)} loaded")
 
     try:
         pipe.execute()

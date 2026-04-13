@@ -222,7 +222,6 @@ Signal sources and what they detect:
 | `afraid_public_reg` | [afraid.org scraper](data/afraid_public_domains.txt) | Domains allowing free public subdomain registration |
 | `ddns_provider` | Hardcoded + [dyn-dns-list](https://github.com/alexandrosmagos/dyn-dns-list) | DDNS provider detection (38k+ domains) |
 | `newly_registered` | [cenk/nrd](https://github.com/cenk/nrd) + WHOIS age | Domains registered in the last 30 days |
-| `bad_asn` | [brianhama/bad-asn-list](https://github.com/brianhama/bad-asn-list) | Known bulletproof/abuse-tolerant hosting ASNs |
 | `lolfsaas` | [LOLFSaaS](https://lolfsaas.github.io/) | Legitimate services abused for C2, phishing, exfil |
 | `psl_is_private` | [Public Suffix List](https://publicsuffix.org/) | Domain under a private PSL suffix (multi-tenant) |
 
@@ -239,7 +238,6 @@ Example output with `--signals`:
     "suspicious_tld": false,
     "afraid_public_reg": false,
     "newly_registered": false,
-    "bad_asn": false,
     "tranco_rank": null,
     "ddns_provider": "duckdns",
     "ddns_domain": "duckdns.org",
