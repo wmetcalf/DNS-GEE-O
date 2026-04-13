@@ -27,7 +27,7 @@ def download_url(url, dest_path):
     """Download a URL to a file atomically."""
     tmp_path = dest_path + ".tmp"
     try:
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(url, headers={"User-Agent": "dnsgeeo/1.0"})
         with urllib.request.urlopen(req) as response, open(tmp_path, "wb") as out:
             out.write(response.read())
         os.replace(tmp_path, dest_path)
