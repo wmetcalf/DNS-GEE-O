@@ -12,7 +12,8 @@ def log(msg):
 
 def needs_refresh(path, refresh_hours):
     if refresh_hours <= 0:
-        return False
+        # refresh_hours=0 means "force refresh" (always return True)
+        return True
     if not os.path.exists(path):
         return True
     try:
