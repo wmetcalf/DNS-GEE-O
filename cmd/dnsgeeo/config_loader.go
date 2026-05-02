@@ -29,6 +29,7 @@ type cliOptions struct {
 	whoisToolPath  *string
 	whoisPython    *string
 	whoisTimeoutMS *int
+	whoisWorkers   *int
 	outputFile     *string
 	maxmindKey     *string
 	dbUpdateHours  *int
@@ -231,6 +232,14 @@ func applyConfigValues(values map[string]string, setFlags map[string]bool, opts 
 					return fmt.Errorf("whois-timeout-ms must be an integer: %w", err)
 				}
 				*opts.whoisTimeoutMS = parsed
+			}
+		case "whois-workers":
+			if opts.whoisWorkers != nil && !setFlags["whois-workers"] {
+				parsed, err := strconv.Atoi(val)
+				if err != nil {
+					return fmt.Errorf("whois-workers must be an integer: %w", err)
+				}
+				*opts.whoisWorkers = parsed
 			}
 		case "output":
 			if opts.outputFile != nil && !setFlags["output"] {

@@ -68,7 +68,7 @@ func setupTestRedis(t *testing.T) (*miniredis.Miniredis, *SignalEngine) {
 	mr.ZAdd("signals:tranco", 57, "github.com")
 	mr.HSet("signals:lolfsaas", "workers.dev", `{"name":"Cloudflare Workers","category":"Cloud","abuse":{"phishing":1,"c2":1,"exfil":0,"payload":0,"creds":0},"matched_pattern":"*.workers.dev"}`)
 	mr.HSet("signals:lolfsaas", "duckdns.org", `{"name":"DuckDNS","category":"C2 Channel","abuse":{"phishing":1,"c2":1,"exfil":0,"payload":0,"creds":0},"matched_pattern":"*.duckdns.org"}`)
-	mr.HSet("signals:psl_private", "github.io", "1")
+	mr.HSet("signals:psl_private", "github.io", "GitHub, Inc.")
 	mr.HSet("signals:psl_private", "herokuapp.com", "Heroku, Inc.")
 	mr.HSet("signals:ddns_suffixes", "duckdns.org", "duckdns")
 	mr.HSet("signals:ddns_suffixes", "ddns.net", "noip")
@@ -109,6 +109,9 @@ func TestLookup_FreeSubdomainHost(t *testing.T) {
 	}
 	if result.PSLPrivateSuffix != "github.io" {
 		t.Errorf("expected psl_private_suffix='github.io', got %q", result.PSLPrivateSuffix)
+	}
+	if result.PSLPrivateOwner != "GitHub, Inc." {
+		t.Errorf("expected psl_private_owner='GitHub, Inc.', got %q", result.PSLPrivateOwner)
 	}
 }
 

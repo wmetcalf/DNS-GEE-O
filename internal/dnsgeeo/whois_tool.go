@@ -144,7 +144,7 @@ func validateToolPath(toolPath string) error {
 	return nil
 }
 
-func RunWhoisTool(ctx context.Context, pythonPath, toolPath string, domains []string, timeout time.Duration) (map[string]*WhoisToolInfo, error) {
+func RunWhoisTool(ctx context.Context, pythonPath, toolPath string, domains []string, timeout time.Duration, workers int) (map[string]*WhoisToolInfo, error) {
 	if toolPath == "" {
 		return nil, errors.New("whois tool path is empty")
 	}
@@ -170,6 +170,9 @@ func RunWhoisTool(ctx context.Context, pythonPath, toolPath string, domains []st
 	}
 
 	args := []string{toolPath, "--list", joined, "--timeout", fmt.Sprintf("%d", timeoutSeconds)}
+	if workers > 0 {
+		args = append(args, "--workers", fmt.Sprintf("%d", workers))
+	}
 	cmd := exec.CommandContext(ctx, pythonPath, args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

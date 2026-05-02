@@ -34,6 +34,7 @@ type Config struct {
 	WhoisToolPath  string
 	WhoisPython    string
 	WhoisTimeout   time.Duration
+	WhoisWorkers   int
 
 	CityDBPath     string
 	ASNDBPath      string
@@ -123,7 +124,10 @@ func (r *RRResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAdd
 		},
 	}
 	ips, err := resolver.LookupIPAddr(ctx, host)
-	return ips, usedServer, err
+	mu.Lock()
+	finalServer := usedServer
+	mu.Unlock()
+	return ips, finalServer, err
 }
 
 const maxCNAMEHops = 10
@@ -358,7 +362,7 @@ func ResolveAndEnrichBatch(ctx context.Context, r *RRResolver, inputs []string, 
 				toolTimeout = 5 * time.Minute
 			}
 			wctx, cancel := context.WithTimeout(ctx, toolTimeout)
-			info, err := RunWhoisTool(wctx, cfg.WhoisPython, cfg.WhoisToolPath, domains, toolTimeout)
+			info, err := RunWhoisTool(wctx, cfg.WhoisPython, cfg.WhoisToolPath, domains, toolTimeout, cfg.WhoisWorkers)
 			cancel()
 			if err != nil {
 				whoisErr = err.Error()

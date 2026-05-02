@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Refresh all dnsgeeo data sources if stale."""
+
 import os
 import sys
 import time
@@ -58,13 +59,40 @@ def refresh_psl(dest_path, refresh_hours):
         log(f"Updated {dest_path}")
 
 
+def iter_psl_private_entries(psl_path):
+    """Yield (suffix, owner) tuples from the PSL private section."""
+    in_private = False
+    current_owner = ""
+    with open(psl_path) as f:
+        for line in f:
+            line = line.strip()
+            if line == "// ===BEGIN PRIVATE DOMAINS===":
+                in_private = True
+                continue
+            if not in_private or not line:
+                continue
+            if line.startswith("//"):
+                if not line.startswith("// ==="):
+                    owner_text = line[2:].strip()
+                    if ":" in owner_text:
+                        owner_text = owner_text.split(":", 1)[0].strip()
+                    if owner_text:
+                        current_owner = owner_text
+                continue
+            suffix = line.lstrip("*.!").lower()
+            if suffix:
+                yield suffix, current_owner
+
+
 def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
     """Download signal lists and load into Redis."""
     sublime_dir = os.path.join(data_dir, "sublime")
     os.makedirs(sublime_dir, exist_ok=True)
 
     # External list sources
-    SUBLIME_BASE = "https://raw.githubusercontent.com/sublime-security/static-files/main"
+    SUBLIME_BASE = (
+        "https://raw.githubusercontent.com/sublime-security/static-files/main"
+    )
     SUBLIME_LISTS = {
         "free_subdomain_hosts.txt": "signals:free_subdomain_hosts",
         "url_shorteners.txt": None,  # merged with PeterDaveHello
@@ -79,7 +107,9 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         "50k": "tranco_top_50k.csv",
         "1m": "tranco.csv",
     }
-    PETERDAVEHELLO_URL = "https://raw.githubusercontent.com/PeterDaveHello/url-shorteners/master/list"
+    PETERDAVEHELLO_URL = (
+        "https://raw.githubusercontent.com/PeterDaveHello/url-shorteners/master/list"
+    )
 
     # Download external lists
     for filename in SUBLIME_LISTS:
@@ -145,8 +175,11 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         staging = live_key + S
         pipe.delete(staging)
         with open(filepath) as f:
-            entries = [line.strip().lower() for line in f
-                       if line.strip() and not line.startswith("#")]
+            entries = [
+                line.strip().lower()
+                for line in f
+                if line.strip() and not line.startswith("#")
+            ]
         if entries:
             pipe.sadd(staging, *entries)
             rename_pairs.append((staging, live_key))
@@ -209,12 +242,14 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
                 domain = domain.strip().lower()
                 if not domain:
                     continue
-                blob = jsonmod.dumps({
-                    "name": entry.get("name", ""),
-                    "category": entry.get("category", ""),
-                    "abuse": entry.get("abuse", {}),
-                    "matched_pattern": domain,
-                })
+                blob = jsonmod.dumps(
+                    {
+                        "name": entry.get("name", ""),
+                        "category": entry.get("category", ""),
+                        "abuse": entry.get("abuse", {}),
+                        "matched_pattern": domain,
+                    }
+                )
                 if domain.startswith("*."):
                     pipe.hset(staging, domain[2:], blob)
                 else:
@@ -226,18 +261,8 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
     if os.path.exists(psl_path):
         staging = "signals:psl_private" + S
         pipe.delete(staging)
-        in_private = False
-        with open(psl_path) as f:
-            for line in f:
-                line = line.strip()
-                if line == "// ===BEGIN PRIVATE DOMAINS===":
-                    in_private = True
-                    continue
-                if not in_private or not line or line.startswith("//"):
-                    continue
-                suffix = line.lstrip("*.!").lower()
-                if suffix:
-                    pipe.hset(staging, suffix, "1")
+        for suffix, owner in iter_psl_private_entries(psl_path):
+            pipe.hset(staging, suffix, owner)
         rename_pairs.append((staging, "signals:psl_private"))
 
     # Load DDNS suffix providers as hash
@@ -278,8 +303,11 @@ def refresh_signals(redis_url, tranco_tier, data_dir, refresh_hours):
         staging = "signals:nrd" + S
         pipe.delete(staging)
         with open(nrd_dest) as f:
-            nrd_entries = [line.strip().lower() for line in f
-                          if line.strip() and not line.startswith("#")]
+            nrd_entries = [
+                line.strip().lower()
+                for line in f
+                if line.strip() and not line.startswith("#")
+            ]
         if nrd_entries:
             pipe.sadd(staging, *nrd_entries)
             rename_pairs.append((staging, "signals:nrd"))
@@ -310,6 +338,7 @@ def refresh_geoip(refresh_hours):
         geoip_script = os.path.join(script_dir, "geoip_fetch.py")
         if os.path.exists(geoip_script):
             import subprocess
+
             env = os.environ.copy()
             env["DNSGEEO_GEOIP_REFRESH_HOURS"] = str(refresh_hours)
             subprocess.run([sys.executable, geoip_script], env=env)
@@ -334,7 +363,9 @@ def main():
     if os.environ.get("DNSGEEO_SIGNALS") == "true":
         redis_url = os.environ.get("DNSGEEO_SIGNALS_REDIS")
         if not redis_url:
-            redis_url = os.environ.get("DNSGEEO_WHOIS_REDIS_URL", "redis://localhost:6379/0")
+            redis_url = os.environ.get(
+                "DNSGEEO_WHOIS_REDIS_URL", "redis://localhost:6379/0"
+            )
         tranco_tier = os.environ.get("DNSGEEO_TRANCO_TIER", "10k")
         data_dir = os.path.dirname(lolfsaas_path) or "/app/data"
         refresh_signals(redis_url, tranco_tier, data_dir, effective_hours)

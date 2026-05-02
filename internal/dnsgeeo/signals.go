@@ -22,6 +22,7 @@ type SignalResult struct {
 	TrancoRank              *int           `json:"tranco_rank"`
 	PSLIsPrivate            bool           `json:"psl_is_private"`
 	PSLPrivateSuffix        string         `json:"psl_private_suffix,omitempty"`
+	PSLPrivateOwner         string         `json:"psl_private_owner,omitempty"`
 	PSLPublicSuffix         string         `json:"psl_public_suffix,omitempty"`
 	DDNSProvider            string         `json:"ddns_provider,omitempty"`
 	DDNSDomain              string         `json:"ddns_domain,omitempty"`
@@ -237,9 +238,10 @@ func (e *SignalEngine) Lookup(ctx context.Context, domain string, nameservers []
 
 	// PSL private — longest suffix match
 	for _, sc := range pslCmds {
-		if _, err := sc.cmd.Result(); err == nil {
+		if owner, err := sc.cmd.Result(); err == nil {
 			result.PSLIsPrivate = true
 			result.PSLPrivateSuffix = sc.suffix
+			result.PSLPrivateOwner = owner
 			break
 		}
 	}

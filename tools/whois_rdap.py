@@ -163,6 +163,17 @@ def parse_args():
         action="store_true",
         help="Output PSL private suffix list with owners as JSON and exit",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.getenv("DNSGEEO_WHOIS_WORKERS", "8")),
+        help=(
+            "Number of parallel workers for RDAP+WHOIS lookups across distinct "
+            "root domains (each worker handles one root domain end-to-end). "
+            "Defaults to 8 or $DNSGEEO_WHOIS_WORKERS. Set to 1 for the previous "
+            "sequential behaviour."
+        ),
+    )
     parser.add_argument("domains", nargs="*")
     return parser.parse_args()
 
@@ -577,7 +588,12 @@ def main():
 
     root_results = {}
 
-    for root in roots:
+    def _lookup_root(root):
+        """Per-root RDAP+WHOIS lookup. Designed to be run from a thread pool —
+        the only shared state read is `cache` (read-only dict snapshot taken
+        before workers start) and `redis_client` (thread-safe). Returns a
+        tuple of (root, entry, cache_hit, cache_payload_or_None) so the
+        main thread can apply cache updates serially after fan-in."""
         cached = None
         if redis_client is not None:
             try:
@@ -591,8 +607,7 @@ def main():
             cached = cache.get(root)
 
         if cached and cache_entry_is_fresh(cached, ttl_hours):
-            root_results[root] = (cached.get("data", {}), True)
-            continue
+            return root, cached.get("data", {}), True, None
 
         entry = {"domain": root}
         created = None
@@ -664,24 +679,54 @@ def main():
                 age_days = int((now_utc - created_utc).total_seconds() / 86400)
                 entry["age_days"] = age_days
 
-        root_results[root] = (entry, False)
+        cache_payload = None
         if not args.no_cache and root:
             if not entry.get("whois_error") and not entry.get("rdap_error"):
-                cached_payload = {
+                cache_payload = {
                     "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                     "data": entry,
                 }
                 if redis_client is not None:
+                    # Redis client is thread-safe — issue the SET from the
+                    # worker so concurrent workers fan out their writes too.
                     try:
                         redis_client.setex(
                             f"dnsgeeo:whois:{root}",
                             int(ttl_hours * 3600),
-                            json.dumps(cached_payload),
+                            json.dumps(cache_payload),
                         )
                     except Exception:
                         pass
-                cache[root] = cached_payload
+        return root, entry, False, cache_payload
+
+    # Run per-root lookups in parallel. Each root needs RDAP (HTTP) + WHOIS
+    # (TCP/43) round-trips — both are network-bound, so threads suit the
+    # workload and avoid forking N python interpreters. Workers default to
+    # 8 (covers the common malware-analysis case of 1-10 distinct roots
+    # per task end-to-end in ~the slowest single-domain time).
+    workers = max(1, min(args.workers, len(roots) or 1))
+    if workers == 1 or not roots:
+        # Sequential path — preserve old behaviour for --workers 1 / debug.
+        for root in roots:
+            r, entry, cache_hit, payload = _lookup_root(root)
+            root_results[r] = (entry, cache_hit)
+            if payload is not None:
+                cache[r] = payload
                 cache_dirty = True
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(_lookup_root, root) for root in roots]
+            for fut in as_completed(futures):
+                try:
+                    r, entry, cache_hit, payload = fut.result()
+                except Exception as exc:
+                    print(f"whois_rdap: worker error: {exc}", file=sys.stderr)
+                    continue
+                root_results[r] = (entry, cache_hit)
+                if payload is not None:
+                    cache[r] = payload
+                    cache_dirty = True
 
     results = []
     for domain in inputs:

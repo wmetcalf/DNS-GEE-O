@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ func main() {
 	var whoisToolPath string
 	var whoisPython string
 	var whoisTimeoutMS int
+	var whoisWorkers int
 	var pslPrivateList bool
 	var outputFile string
 	var configPath string
@@ -67,6 +69,15 @@ func main() {
 	flag.StringVar(&whoisToolPath, "whois-tool", "", "Path to whois_rdap.py (used with --whois)")
 	flag.StringVar(&whoisPython, "whois-python", "python3", "Python executable for whois_rdap.py")
 	flag.IntVar(&whoisTimeoutMS, "whois-timeout-ms", 20000, "Timeout for whois_rdap.py in milliseconds")
+	
+	whoisWorkersDefault := 8
+	if envW := os.Getenv("DNSGEEO_WHOIS_WORKERS"); envW != "" {
+		if val, err := strconv.Atoi(envW); err == nil {
+			whoisWorkersDefault = val
+		}
+	}
+	flag.IntVar(&whoisWorkers, "whois-workers", whoisWorkersDefault, "Number of parallel workers for WHOIS/RDAP")
+	
 	flag.BoolVar(&pslPrivateList, "psl-private-list", false, "Output PSL private suffix list via the WHOIS helper and exit")
 	flag.StringVar(&outputFile, "output", "", "Output file path (default: stdout)")
 	flag.StringVar(&configPath, "config", "", "Optional config file path (key=value format). CLI args override file values.")
@@ -107,6 +118,7 @@ func main() {
 			whoisToolPath:  &whoisToolPath,
 			whoisPython:    &whoisPython,
 			whoisTimeoutMS: &whoisTimeoutMS,
+			whoisWorkers:   &whoisWorkers,
 			outputFile:     &outputFile,
 			maxmindKey:     &maxmindKey,
 			dbUpdateHours:  &dbUpdateHours,
@@ -212,6 +224,7 @@ func main() {
 		WhoisToolPath:  whoisToolPath,
 		WhoisPython:    whoisPython,
 		WhoisTimeout:   time.Duration(whoisTimeoutMS) * time.Millisecond,
+		WhoisWorkers:   whoisWorkers,
 		CityDBPath:     cityDB,
 		ASNDBPath:      asnDB,
 		LOLFSaaSDBPath: lolfsaasDBPath,
